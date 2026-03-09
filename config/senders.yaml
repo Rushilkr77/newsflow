@@ -1,0 +1,81 @@
+# Newsletter sender registry.
+#
+# To add a new newsletter:
+#   1. Add an entry below with a unique id, sender_email, and parser.
+#   2. Set enabled: true.
+#   3. If the sender needs variant detection, set variant_detection accordingly.
+#   4. For quick onboarding without a custom parser, set parser: generic
+#      (extracts all <a href> links with surrounding text — works for most newsletters).
+#
+# Alternatively, add sender emails to NEWSLETTER_SENDERS in .env to use the
+# generic parser without touching this file.
+
+senders:
+  - id: tldr_ai
+    enabled: true
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR AI"
+    priority_default: P0
+    parser: tldr
+
+  - id: tldr_tech
+    enabled: true
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR"
+    priority_default: P1
+    parser: tldr
+
+  - id: tldr_dev
+    enabled: true
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR DEV"
+    priority_default: P2
+    parser: tldr
+
+  - id: techcrunch
+    enabled: true
+    sender_email: newsletters@techcrunch.com
+    variant_detection: none
+    priority_default: P0
+    parser: techcrunch
+
+  - id: harper_carroll
+    enabled: true
+    sender_email: hai@harpercarrollai.com
+    variant_detection: subject_filter
+    subject_keywords:
+      - "what's new in ai"
+      - "this week's ai news"
+      - "ai news"
+    priority_default: P0
+    parser: harper_carroll
+
+  # ET sources deferred to Phase 2 — paywall requires Inc42 fallback strategy
+  - id: ettech
+    enabled: false
+    sender_email: newsletter@ettech.com
+    variant_detection: none
+    priority_default: P1
+    parser: ettech
+
+  - id: et_ai
+    enabled: false
+    sender_email: newsletter@economictimesnews.com
+    variant_detection: from_display_name
+    display_name_match: "ET AI"
+    subject_prefix: "ET AI:"
+    priority_default: P1
+    parser: et_ai
+
+excluded_variants:
+  - sender: dan@tldrnewsletter.com
+    patterns:
+      - "TLDR CRYPTO"
+      - "TLDR FINTECH"
+      - "TLDR FOUNDERS"
+  - sender: newsletter@economictimesnews.com
+    exclude_display_names:
+      - "The Economic Times"

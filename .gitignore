@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+credentials.json
+token.json
+
+# Pipeline outputs
+workspace/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.python-version
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

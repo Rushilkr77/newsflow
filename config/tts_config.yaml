@@ -1,0 +1,27 @@
+primary:
+  provider: chatterbox
+  model: ResembleAI/Chatterbox
+  params:
+    cfgw: 0.5
+    exaggeration: 0.4
+    temperature: 0.7
+    max_chars_per_call: 300
+  voice_reference: null
+
+fallback:
+  provider: elevenlabs
+  model: eleven_turbo_v2_5
+  voice_id: "josh"
+  params:
+    stability: 0.5
+    similarity_boost: 0.75
+    max_chars_per_call: 5000
+
+output:
+  format: mp3
+  bitrate: 128k
+  sample_rate: 44100
+  silence_between_segments_ms: 1500
+  silence_between_articles_ms: 800
+  normalize_loudness: true
+  target_lufs: -16

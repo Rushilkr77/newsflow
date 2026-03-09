@@ -1,0 +1,72 @@
+user_profile:
+  role: "Software Engineer building product awareness for AI PM and developer interviews at Series B+ startups"
+  interests:
+    - Major launches and announcements from big tech (Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft)
+    - AI products and tools that change how software is built or used
+    - Innovative non-AI products representing a real direction change (hardware, platforms)
+    - Indian startup ecosystem — founders, funding, notable product launches
+    - Funding and M&A in the AI/tech space
+    - Business strategy: SaaS disruption, go-to-market, Series B+ company moves
+    - Technical depth with product understanding — both engineering and market perspectives
+
+priority_rules:
+  P0_must_include:
+    - "Major launches or announcements from big tech (Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft) — product OR model"
+    - "AI products or tools with clear impact on how software is built or used"
+    - "India-specific startups: significant product launch, funding >$10M, or notable founder story"
+    - "Non-AI hardware or software representing a genuine direction change (new form factor, platform shift, new category)"
+    - "Funding rounds >$50M in AI space"
+
+  P1_high:
+    - "AI products from smaller or emerging startups"
+    - "India tech industry shifts: IT sector disruption, outsourcing changes, Indian SaaS"
+    - "Funding $10-50M in AI"
+    - "Business strategy: go-to-market, pricing, Series B+ company moves"
+    - "SaaS disruption stories with clear product or market angle"
+
+  P2_if_space:
+    - "Purely engineering or infrastructure deep dives with no product angle"
+    - "Regulatory, safety, policy, or compliance news"
+    - "Funding <$10M"
+    - "Open-source milestones without a clear 'what does this unlock' angle"
+    - "Incremental product updates with no significant strategic shift"
+
+  P3_skip:
+    - "Crypto or Web3 (unless direct AI intersection)"
+    - "Pure code tutorials or code walkthroughs"
+    - "Sponsor or ad content within newsletters"
+    - "Incremental consumer hardware with no meaningful leap"
+    - "Generic career advice"
+
+dedup:
+  url_match: true
+  title_similarity_threshold: 0.85
+  content_similarity_threshold: 0.90
+  source_priority_order:
+    - harper_carroll
+    - et_ai
+    - ettech
+    - techcrunch
+    - tldr_ai
+    - tldr_tech
+    - tldr_dev
+    - custom
+
+time_budget:
+  target_duration_min: 90
+  p0_deep_dive:
+    duration_min_per_article: "5-7"
+    max_articles: 6
+    total_max_min: 35
+  p1_standard:
+    duration_min_per_article: "2-3"
+    max_articles: 12
+    total_max_min: 30
+  p2_quick_hit:
+    duration_sec_per_article: "30-60"
+    max_articles: 15
+    total_max_min: 12
+  overhead:
+    intro_min: 2
+    transitions_min: 5
+    closing_min: 5
