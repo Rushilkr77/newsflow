@@ -18,6 +18,12 @@ fallback:
   voice_reference: null        # path to a .wav reference clip for voice cloning (optional)
   voice_reference_text: null   # transcript of the reference clip (required if voice_reference set)
 
+segment_routing:
+  # Chatterbox: short/punchy segments — expressiveness > sustained prosody
+  chatterbox: [cold_open, intro, quick_hits, closing]
+  # F5-TTS: long narrative segments — paragraph-level prosody > per-sentence expressiveness
+  f5_tts:     [ai_updates, funding, india_tech, product_strategy]
+
 output:
   format: mp3
   bitrate: 128k
