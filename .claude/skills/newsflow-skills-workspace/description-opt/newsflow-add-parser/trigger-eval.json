@@ -1,0 +1,23 @@
+[
+  {"query": "I want to add support for the Morning Brew newsletter to NewsFlow — I've got a sample email saved at tests/fixtures/morning_brew_sample.html", "should_trigger": true},
+  {"query": "add tldr crypto parser — they launched a new edition last month and I want it included in the daily pipeline", "should_trigger": true},
+  {"query": "implement the Hacker Newsletter parser, it comes from hacker.newsletter@hacker.io and the structure is totally different from TLDR", "should_trigger": true},
+  {"query": "we're onboarding a new newsletter source called AI Breakfast (newsletter@aibreakfast.com), need to hook it into ingestion", "should_trigger": true},
+  {"query": "build a parser for the bloomberg technology email — sample HTML is at tests/fixtures/bloomberg_tech.html — it has a weird nested table layout", "should_trigger": true},
+  {"query": "need to wire up the Import AI weekly digest by Jack Clark, register it in senders.yaml and write the parser class", "should_trigger": true},
+  {"query": "implement et_ai — it's the Economic Times AI newsletter from ettech@email.indiatimes.com, different format from ETtech", "should_trigger": true},
+  {"query": "benn stancil's data newsletter (benn@substack.com) just got added to our reading list, can you get it into the pipeline?", "should_trigger": true},
+  {"query": "the tldr parser is only handling TLDR AI and TLDR Tech but they also send TLDR DevOps — can you extend it to cover that edition too?", "should_trigger": true},
+  {"query": "add stratechery weekly digest as a source — it's paywalled but I forward it to rushilmisc77@gmail.com, fixture is in tests/fixtures/", "should_trigger": true},
+
+  {"query": "the tldr parser is returning empty article lists for today's TLDR AI email — nothing is coming through at all", "should_trigger": false},
+  {"query": "ETtech parser is failing on today's email — looks like they changed their HTML structure again", "should_trigger": false},
+  {"query": "update senders.yaml — TLDR AI changed their sender address from dan@tldrnewsletter.com to ai@tldrnewsletter.com", "should_trigger": false},
+  {"query": "what newsletters are currently supported by the pipeline?", "should_trigger": false},
+  {"query": "the harper_carroll_parser is grabbing the wrong URLs — it's picking up tracking links instead of the real article URLs", "should_trigger": false},
+  {"query": "add better error handling to the techcrunch parser for when an article cell has no anchor tag", "should_trigger": false},
+  {"query": "write pytest unit tests for the et_ai_parser — I want coverage for the case where the email has no articles", "should_trigger": false},
+  {"query": "refactor the tldr parser to use the new extract_links() method from base_parser.py", "should_trigger": false},
+  {"query": "pipeline ran this morning but workspace/2026-03-16 only has raw_articles.json — nothing got curated", "should_trigger": false},
+  {"query": "check today's output quality — how many articles made it through from ETtech?", "should_trigger": false}
+]

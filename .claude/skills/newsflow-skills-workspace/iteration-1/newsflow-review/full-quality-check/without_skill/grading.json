@@ -1,0 +1,19 @@
+{
+  "expectations": [
+    {"text": "Reads raw_articles.json and reports total article count plus count per source", "passed": false, "evidence": "Agent self-reported: 'total count only, no per-source breakdown ✗'. Reported 37 articles total but no per-source table."},
+    {"text": "Reads curated_articles.json and reports P0/P1/P2/P3 breakdown", "passed": false, "evidence": "Agent self-reported: 'NOT explicitly stated ✗'. Did not produce P0/P1/P2 counts."},
+    {"text": "Reads summaries.json and reports word count for at least one summary against target range", "passed": false, "evidence": "Agent self-reported: 'NOT explicitly checked ✗'. Did not report summary word counts against target."},
+    {"text": "Reads podcast_script.json and reports total_estimated_duration_min", "passed": true, "evidence": "12 min stated clearly in Stage 4 section."},
+    {"text": "Produces a structured quality report with an overall PASS / NEEDS ATTENTION / FAIL rating", "passed": false, "evidence": "Agent self-reported: 'gives 3/10 per stage but not PASS/NEEDS ATTENTION/FAIL ✗'. Used 3/10 scoring rather than the required format."}
+  ],
+  "summary": {"passed": 1, "failed": 4, "total": 5, "pass_rate": 0.2},
+  "timing": {"executor_duration_seconds": 0, "total_tokens": 0},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "Without skill went deeper in some dimensions (Pokemon article, discussion hook off-by-one bug, specific fabricated news items in funding) but missed the structured reporting format entirely. The skill's structured template constrains the output to a consistent, machine-readable format — without it, the agent produces a richer but inconsistent narrative report."},
+      {"reason": "Consider whether the skill should encourage deeper qualitative analysis (like the without_skill baseline found) in addition to the structured quantitative checks."}
+    ],
+    "overall": "1/5 — failed 4 of 5 structural assertions. Without the skill's template, the agent produced a detailed qualitative review (3/10 scoring per stage, specific hallucinations named) but missed the required structured format: per-source counts, P0/P1/P2 breakdown, word count table, and PASS/FAIL rating."
+  }
+}

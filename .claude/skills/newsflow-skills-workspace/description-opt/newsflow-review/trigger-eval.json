@@ -1,0 +1,23 @@
+[
+  {"query": "how did the pipeline do today? want to check coverage before heading to the gym", "should_trigger": true},
+  {"query": "check quality of today's run — the MP3 felt shorter than usual, want to make sure nothing was dropped", "should_trigger": true},
+  {"query": "how many articles came through from each source this morning? concerned ETtech is underrepresented", "should_trigger": true},
+  {"query": "can you review the episode for 2026-03-16 and give me a pass/fail against the DESIGN.md targets?", "should_trigger": true},
+  {"query": "the episode felt thin on AI content today — is TLDR AI being included properly? check the funnel", "should_trigger": true},
+  {"query": "review today's summaries and tell me if the word counts are hitting targets — especially for ai_updates segment", "should_trigger": true},
+  {"query": "quick sanity check on the podcast script quality before my commute — is the duration and segment count right?", "should_trigger": true},
+  {"query": "what's the P0/P1/P2 breakdown for today's curation? trying to gauge if the curator is working well", "should_trigger": true},
+  {"query": "give me a quality report on workspace/2026-03-16 — I want to know if there are any hallucinations in the script", "should_trigger": true},
+  {"query": "the harper carroll source has been quiet lately — is it contributing to today's episode or is the parser broken?", "should_trigger": true},
+
+  {"query": "pipeline isn't running this morning — can you debug what's wrong?", "should_trigger": false},
+  {"query": "add Morning Brew newsletter as a new source to the pipeline", "should_trigger": false},
+  {"query": "how does the ranking algorithm in curator.py decide which articles are P0?", "should_trigger": false},
+  {"query": "update the summary word count targets in DESIGN.md to 400-600 words per P0", "should_trigger": false},
+  {"query": "can we increase the target episode duration from 60 minutes to 90 minutes in preferences.yaml?", "should_trigger": false},
+  {"query": "summarize the top 5 AI articles from today's episode for me", "should_trigger": false},
+  {"query": "run the pipeline for yesterday's date, 2026-03-15", "should_trigger": false},
+  {"query": "how many P0 articles should the curator ideally produce per run according to DESIGN.md?", "should_trigger": false},
+  {"query": "the tldr parser is returning empty articles — can you fix it?", "should_trigger": false},
+  {"query": "explain how the SSML markup in the script writer affects the TTS output", "should_trigger": false}
+]

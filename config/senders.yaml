@@ -13,6 +13,7 @@
 senders:
   - id: tldr_ai
     enabled: true
+    lookback_days: 1
     sender_email: dan@tldrnewsletter.com
     variant_detection: from_display_name
     display_name_match: "TLDR AI"
@@ -21,6 +22,7 @@ senders:
 
   - id: tldr_tech
     enabled: true
+    lookback_days: 1
     sender_email: dan@tldrnewsletter.com
     variant_detection: from_display_name
     display_name_match: "TLDR"
@@ -29,6 +31,7 @@ senders:
 
   - id: tldr_dev
     enabled: true
+    lookback_days: 1
     sender_email: dan@tldrnewsletter.com
     variant_detection: from_display_name
     display_name_match: "TLDR DEV"
@@ -37,6 +40,7 @@ senders:
 
   - id: techcrunch
     enabled: true
+    lookback_days: 1
     sender_email: newsletters@techcrunch.com
     variant_detection: none
     priority_default: P0
@@ -44,25 +48,23 @@ senders:
 
   - id: harper_carroll
     enabled: true
+    lookback_days: 8        # Weekly newsletter — look back 8 days, keep most recent email
     sender_email: hai@harpercarrollai.com
-    variant_detection: subject_filter
-    subject_keywords:
-      - "what's new in ai"
-      - "this week's ai news"
-      - "ai news"
+    variant_detection: none  # Unique sender address — accept any email from this address
     priority_default: P0
     parser: harper_carroll
 
-  # ET sources deferred to Phase 2 — paywall requires Inc42 fallback strategy
   - id: ettech
-    enabled: false
+    enabled: true
+    lookback_days: 1
     sender_email: newsletter@ettech.com
     variant_detection: none
     priority_default: P1
     parser: ettech
 
   - id: et_ai
-    enabled: false
+    enabled: true
+    lookback_days: 1
     sender_email: newsletter@economictimesnews.com
     variant_detection: from_display_name
     display_name_match: "ET AI"

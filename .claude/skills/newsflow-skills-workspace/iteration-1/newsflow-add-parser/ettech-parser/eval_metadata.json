@@ -1,0 +1,13 @@
+{
+  "eval_id": 1,
+  "eval_name": "ettech-parser",
+  "prompt": "I need to add the ettech parser. The newsletter comes from newsletter@ettech.com and has India's top 5 tech stories per edition.",
+  "assertions": [
+    "References docs/DESIGN.md ETtech parser section before writing code",
+    "References parsers/base_parser.py to understand the interface to implement",
+    "Mentions needing a real email fixture before starting implementation",
+    "Produces an ETtechParser class that inherits from BaseParser",
+    "Mentions registering the parser in agents/ingestion.py",
+    "Mentions ET paywall limitation and snippet fallback strategy"
+  ]
+}

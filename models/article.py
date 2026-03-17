@@ -34,6 +34,14 @@ class CuratedArticle(BaseModel):
     snippet: str
     full_text: Optional[str] = None
     discussion_hooks: list[str] = Field(default_factory=list, description="Interview-ready insights")
+    context_only: bool = Field(
+        default=False,
+        description=(
+            "True when this HC story covers the same topic as a TLDR story from earlier "
+            "this week — treated as editorial context rather than breaking news; "
+            "priority capped at P1."
+        ),
+    )
 
 
 class ArticleSummary(BaseModel):

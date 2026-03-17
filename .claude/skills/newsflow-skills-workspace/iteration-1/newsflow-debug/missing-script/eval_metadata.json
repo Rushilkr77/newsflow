@@ -1,0 +1,12 @@
+{
+  "eval_id": 4,
+  "eval_name": "missing-script",
+  "prompt": "podcast_script.json is missing from workspace/2026-03-14/ but summaries.json is there with 18 summaries. What happened?",
+  "assertions": [
+    "Correctly identifies Script Writer as the failed stage (summaries exist but script is absent)",
+    "References JSON malformation from llama3.2:3b as the primary failure suspect",
+    "Mentions _clean_json() or _MAX_RETRIES in script_writer.py as the relevant mechanism",
+    "Suggests the Anthropic API fallback (USE_LOCAL_LLM=false) as a recovery option",
+    "Does not suggest re-running the whole pipeline from ingestion unnecessarily"
+  ]
+}

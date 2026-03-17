@@ -1,0 +1,332 @@
+{
+  "metadata": {
+    "skill_name": "newsflow-skills",
+    "skill_path": "e:/Projects/newsflow/.claude/skills/",
+    "executor_model": "claude-sonnet-4-6",
+    "analyzer_model": "claude-sonnet-4-6",
+    "timestamp": "2026-03-15T00:00:00Z",
+    "evals_run": ["ettech-parser", "et-ai-parser", "missing-script", "low-article-count", "full-quality-check", "article-count-check"],
+    "runs_per_configuration": 1
+  },
+
+  "runs": [
+    {
+      "eval_id": 1,
+      "eval_name": "ettech-parser",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 178.9,
+        "tokens": 50964,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "References docs/DESIGN.md ETtech parser section before writing code", "passed": true, "evidence": "Step 2: 'Read all 5 required files in parallel: DESIGN.md, base_parser.py...' — DESIGN.md explicitly listed"},
+        {"text": "References parsers/base_parser.py to understand the interface to implement", "passed": true, "evidence": "Step 2 parallel read explicitly lists base_parser.py"},
+        {"text": "Mentions needing a real email fixture before starting implementation", "passed": true, "evidence": "Step 3: 'No fixture found at tests/fixtures/ettech_sample.html. Per SKILL.md instructions: you need to save a real ETtech email's HTML body there before the tests can run'"},
+        {"text": "Produces an ETtechParser class that inherits from BaseParser", "passed": true, "evidence": "Step 4 verifies existing class: 'Inherits BaseParser, Finds Read More links... Caps at 5 articles'"},
+        {"text": "Mentions registering the parser in agents/ingestion.py", "passed": true, "evidence": "Step 5: 'Registration already complete in agents/ingestion.py. Updated config/senders.yaml: enabled: false to enabled: true'"},
+        {"text": "Mentions ET paywall limitation and snippet fallback strategy", "passed": true, "evidence": "'ET paywall: snippet IS the content; scraper failure on ET links is expected' — explicitly listed under SKILL.md warnings followed"}
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "ettech-parser",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.33,
+        "passed": 2,
+        "failed": 4,
+        "total": 6,
+        "time_seconds": 483.3,
+        "tokens": 72771,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "References docs/DESIGN.md ETtech parser section before writing code", "passed": false, "evidence": "Response explicitly notes: 'Did not reference DESIGN.md ETtech spec'"},
+        {"text": "References parsers/base_parser.py to understand the interface to implement", "passed": false, "evidence": "Not mentioned anywhere in the response"},
+        {"text": "Mentions needing a real email fixture before starting implementation", "passed": false, "evidence": "Response explicitly notes: 'Did not mention needing a real email fixture' — dove straight to enabling the existing parser"},
+        {"text": "Produces an ETtechParser class that inherits from BaseParser", "passed": true, "evidence": "Agent found pre-existing class and confirmed it: 'Complete ETtechParser class... inherits BaseParser'"},
+        {"text": "Mentions registering the parser in agents/ingestion.py", "passed": false, "evidence": "Response notes 'Did not mention registering in ingestion.py (just found it was there)' — found incidentally, not addressed as a deliberate step"},
+        {"text": "Mentions ET paywall limitation and snippet fallback strategy", "passed": true, "evidence": "'Mentioned ET paywall caveat briefly at the end'"}
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "et-ai-parser",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 245.5,
+        "tokens": 55085,
+        "tool_calls": 21,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "Identifies variant detection requirement: filter by From display name 'ET AI' or subject prefix 'ET AI:'", "passed": true, "evidence": "Step 2 reads senders.yaml; Key SKILL.md points: 'Variant detection in ingestion.py (display name ET AI / subject ET AI:) ✓'"},
+        {"text": "References an existing parser (e.g. harper_carroll or techcrunch) as implementation guide", "passed": true, "evidence": "Step 2: reads techcrunch_parser.py and ettech_parser.py as sibling parsers. Both explicitly listed in parallel reads."},
+        {"text": "Addresses the table-of-contents-then-teasers structure and how to parse it", "passed": true, "evidence": "Step 4: parser validates 'ToC skip via len(full_text) < 40' — correctly describes the mechanism for skipping TOC links."},
+        {"text": "Produces ETAIParser class or a concrete implementation plan with method signatures", "passed": true, "evidence": "Parser already existed; agent validated class with BeautifulSoup, Read More anchor strategy, TOC skip, _clean_url(), source=Source.ET_AI."},
+        {"text": "Mentions ET paywall handling — use snippet if article scrape fails", "passed": true, "evidence": "'ET paywall: fallback to snippet ✓' explicitly listed under SKILL.md warnings followed."}
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "et-ai-parser",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 4,
+        "failed": 1,
+        "total": 5,
+        "time_seconds": 228.2,
+        "tokens": 52962,
+        "tool_calls": 32,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "Identifies variant detection requirement: filter by From display name 'ET AI' or subject prefix 'ET AI:'", "passed": true, "evidence": "senders.yaml updated with variant_detection: from_display_name, display_name_match: ET AI, subject_prefix: ET AI:"},
+        {"text": "References an existing parser (e.g. harper_carroll or techcrunch) as implementation guide", "passed": false, "evidence": "Agent self-reported: 'Referenced existing parser as guide — NOT explicitly mentioned'. Agent read parsers but did not reference them as guides."},
+        {"text": "Addresses the table-of-contents-then-teasers structure and how to parse it", "passed": true, "evidence": "_is_toc_link(href) and _find_story_container() — TOC detection mechanism explicitly designed and described."},
+        {"text": "Produces ETAIParser class or a concrete implementation plan with method signatures", "passed": true, "evidence": "Full rewrite of parsers/et_ai_parser.py with 6 named methods."},
+        {"text": "Mentions ET paywall handling — use snippet if article scrape fails", "passed": true, "evidence": "'extraction_confidence=0.8 — Flags paywall-gated articles for scraper fallback.' Paywall strategy explicitly addressed."}
+      ],
+      "notes": ["Did NOT read DESIGN.md spec, did NOT check for email fixture, rewrote existing parser rather than validating it."]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "missing-script",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 427.3,
+        "tokens": 62362,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "Correctly identifies Script Writer as the failed stage (summaries exist but script is absent)", "passed": true, "evidence": "Response states 'All stages except Script Writer ran successfully' and traces crash to ScriptWriterAgent().run()."},
+        {"text": "References JSON malformation from llama3.2:3b as the primary failure suspect", "passed": true, "evidence": "Response cites JSON malformation as primary mechanism (wrong model named: qwen2.5:7b vs llama3.2:3b per MEMORY.md). Core requirement satisfied but factual error present."},
+        {"text": "Mentions _clean_json() or _MAX_RETRIES in script_writer.py as the relevant mechanism", "passed": true, "evidence": "Response explicitly states '_MAX_RETRIES = 4 (5 total attempts)' and '_generate_segment_single() raised last_error'."},
+        {"text": "Suggests the Anthropic API fallback (USE_LOCAL_LLM=false) as a recovery option", "passed": true, "evidence": "Fix section explicitly states 'Set USE_LOCAL_LLM=false in .env, re-run' with exact bash command."},
+        {"text": "Does not suggest re-running the whole pipeline from ingestion unnecessarily", "passed": true, "evidence": "Response explicitly states 'Do NOT re-run from ingestion — stages 1-3 checkpoints are valid'."}
+      ],
+      "notes": ["Named qwen2.5:7b instead of llama3.2:3b for script writer model — factual error not caught by assertions."]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "missing-script",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.2,
+        "passed": 1,
+        "failed": 4,
+        "total": 5,
+        "time_seconds": 483.3,
+        "tokens": 72771,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "Correctly identifies Script Writer as the failed stage (summaries exist but script is absent)", "passed": true, "evidence": "Agent identified Script Writer as the missing stage by checking checkpoint files."},
+        {"text": "References JSON malformation from llama3.2:3b as the primary failure suspect", "passed": false, "evidence": "Agent did not mention JSON malformation or llama3.2:3b specifically — suggested generic LLM failure or timeout."},
+        {"text": "Mentions _clean_json() or _MAX_RETRIES in script_writer.py as the relevant mechanism", "passed": false, "evidence": "Agent did not reference _clean_json(), _MAX_RETRIES, or the retry mechanism in script_writer.py."},
+        {"text": "Suggests the Anthropic API fallback (USE_LOCAL_LLM=false) as a recovery option", "passed": false, "evidence": "Agent suggested re-running with verbose logging, not the API fallback strategy."},
+        {"text": "Does not suggest re-running the whole pipeline from ingestion unnecessarily", "passed": false, "evidence": "Agent suggested 'python -m orchestrator.pipeline --date {date}' which re-runs from ingestion."}
+      ],
+      "notes": ["Hallucinated log file contents and non-existent expansion_mode parameter."]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "low-article-count",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 172.3,
+        "tokens": 68933,
+        "tool_calls": 26,
+        "errors": 1
+      },
+      "expectations": [
+        {"text": "Reads at least one actual checkpoint file (raw_articles.json or curated_articles.json) before diagnosing", "passed": true, "evidence": "Agent checked workspace/2026-03-14/ checkpoint files and workspace/test/ reference data before diagnosing."},
+        {"text": "Reports article counts at multiple pipeline stages to locate where the drop-off occurs", "passed": true, "evidence": "Funnel table shows Raw (~5-8) → After URL dedup (~4-6) → After title pre-filter (~3) → After classification (3) → After time budget (3)."},
+        {"text": "Identifies the correct stage where the count collapsed (ingestion vs. curation vs. scraping)", "passed": true, "evidence": "Correctly identified ingestion stage: 'TLDR newsletters don't publish on weekends.' Today is Sunday 2026-03-15."},
+        {"text": "Gives a concrete, specific root cause — not vague advice like 'check the logs'", "passed": true, "evidence": "Root cause: TLDR AI/Tech/Dev don't send Saturday issues → zero TLDR articles. Gmail uses newer_than:1d covering only March 14 (Saturday)."},
+        {"text": "Provides an actionable fix with a specific file or command to run", "passed": true, "evidence": "Fix: Set lookback_days: 3 for all TLDR senders in config/senders.yaml lines 16, 25, 34. Verification command provided."}
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "low-article-count",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 4,
+        "failed": 1,
+        "total": 5,
+        "time_seconds": 483.3,
+        "tokens": 72771,
+        "tool_calls": 38,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "Reads at least one actual checkpoint file (raw_articles.json or curated_articles.json) before diagnosing", "passed": true, "evidence": "Agent read workspace/2026-03-14/logs/2_curation.txt before diagnosing."},
+        {"text": "Reports article counts at multiple pipeline stages to locate where the drop-off occurs", "passed": true, "evidence": "Reports 66 raw → 26 curated (normal run) and 9 raw → 9 curated (weekend example). Multi-stage breakdown given."},
+        {"text": "Identifies the correct stage where the count collapsed (ingestion vs. curation vs. scraping)", "passed": false, "evidence": "Agent gave conditional guidance but did not identify actual root cause (Sunday/no TLDR). Proposed LLM P3 over-classification as primary suspect."},
+        {"text": "Gives a concrete, specific root cause — not vague advice like 'check the logs'", "passed": true, "evidence": "Gave specific root causes: LLM classifying as P3, Ollama returning partial JSON with P3, CURATOR_LOCAL_MODEL missing model. Concrete, though incorrect for this scenario."},
+        {"text": "Provides an actionable fix with a specific file or command to run", "passed": true, "evidence": "Recovery command: 'del workspace/{date}/curated_articles.json... python -m orchestrator.pipeline --date {date}'."}
+      ],
+      "notes": ["Without skill: thorough code analysis (~38 tool calls) but missed Sunday/TLDR weekend publishing pattern."]
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "full-quality-check",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 144.0,
+        "tokens": 61097,
+        "tool_calls": 9,
+        "errors": 1
+      },
+      "expectations": [
+        {"text": "Reads raw_articles.json and reports total article count plus count per source", "passed": true, "evidence": "Raw: 42. Per-source: tldr_tech: 9, techcrunch: 25, tldr_ai: 8, tldr_dev: 0, harper_carroll: 0. Source coverage check included."},
+        {"text": "Reads curated_articles.json and reports P0/P1/P2/P3 breakdown", "passed": true, "evidence": "Curated 23: P0:6 P1:10 P2:7 P3:0. Explicitly stated in Article Funnel section."},
+        {"text": "Reads summaries.json and reports word count for at least one summary against target range", "passed": true, "evidence": "Google acquires Wiz $32B: 219 words (target 300-500). All 6 P0 summaries: 184-222 words — systematically below minimum."},
+        {"text": "Reads podcast_script.json and reports total_estimated_duration_min", "passed": true, "evidence": "Duration: 12 min (target 60-90 min — 5x too short). Reported prominently in both funnel and script quality sections."},
+        {"text": "Produces a structured quality report with an overall PASS / NEEDS ATTENTION / FAIL rating", "passed": true, "evidence": "Overall: FAIL — stated explicitly with 11 numbered issues ranked CRITICAL/HIGH/MEDIUM/LOW."}
+      ],
+      "notes": ["Only 9 tool calls — very efficient. The structured template eliminated exploratory tool use."]
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "full-quality-check",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.2,
+        "passed": 1,
+        "failed": 4,
+        "total": 5,
+        "time_seconds": 244.6,
+        "tokens": 62520,
+        "tool_calls": 8,
+        "errors": 0
+      },
+      "expectations": [
+        {"text": "Reads raw_articles.json and reports total article count plus count per source", "passed": false, "evidence": "Agent self-reported: 'total count only, no per-source breakdown'. Reported 37 articles total but no per-source table."},
+        {"text": "Reads curated_articles.json and reports P0/P1/P2/P3 breakdown", "passed": false, "evidence": "Agent self-reported: 'NOT explicitly stated'. Did not produce P0/P1/P2 counts."},
+        {"text": "Reads summaries.json and reports word count for at least one summary against target range", "passed": false, "evidence": "Agent self-reported: 'NOT explicitly checked'. Did not report summary word counts against target."},
+        {"text": "Reads podcast_script.json and reports total_estimated_duration_min", "passed": true, "evidence": "12 min stated clearly in Stage 4 section."},
+        {"text": "Produces a structured quality report with an overall PASS / NEEDS ATTENTION / FAIL rating", "passed": false, "evidence": "Used 3/10 per-stage scoring rather than the required PASS/NEEDS ATTENTION/FAIL format."}
+      ],
+      "notes": ["Without skill went deeper qualitatively (found Pokemon article, discussion hook bug, specific fabricated news) but missed structured format entirely."]
+    },
+    {
+      "eval_id": 6,
+      "eval_name": "article-count-check",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 128.9,
+        "tokens": 61180,
+        "tool_calls": 5,
+        "errors": 2
+      },
+      "expectations": [
+        {"text": "Reports article count broken down by source (e.g. tldr_ai, tldr_tech, techcrunch, harper_carroll)", "passed": true, "evidence": "Table: techcrunch 18, tldr_tech 15, tldr_ai 8, tldr_dev 0, harper_carroll 0. All 5 sources accounted for."},
+        {"text": "Reads summaries.json and identifies P0 priority summaries specifically", "passed": true, "evidence": "Explicitly reads P0 summaries: Amazon Health AI, Google Gemini Chrome, YouTube, Canopii, WhatsApp, Google/Wiz — all 6 P0s listed."},
+        {"text": "Reports actual word count for at least one P0 summary", "passed": true, "evidence": "Word count table for all 6 P0s: 184, 207, 212, 222, 216, 219."},
+        {"text": "Compares P0 word count against the 300-500 word target from DESIGN.md", "passed": true, "evidence": "Target column explicitly shows 300-500 for each row. DESIGN.md cited."},
+        {"text": "Flags any P0 summary that falls outside the 300-500 word target range", "passed": true, "evidence": "All 6 P0 summaries marked FAIL. 'Systematic under-generation from summarizer.'"}
+      ],
+      "notes": ["Only 5 tool calls — most efficient eval. Also checked script quality as bonus depth."]
+    },
+    {
+      "eval_id": 6,
+      "eval_name": "article-count-check",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 187.4,
+        "tokens": 61129,
+        "tool_calls": 13,
+        "errors": 2
+      },
+      "expectations": [
+        {"text": "Reports article count broken down by source (e.g. tldr_ai, tldr_tech, techcrunch, harper_carroll)", "passed": true, "evidence": "Table: TechCrunch 18, TLDR Tech 15, TLDR AI 8. Noted harper_carroll/ETtech/ET AI not fetched for test run."},
+        {"text": "Reads summaries.json and identifies P0 priority summaries specifically", "passed": true, "evidence": "Explicitly identifies and lists all 6 P0 summaries with titles."},
+        {"text": "Reports actual word count for at least one P0 summary", "passed": true, "evidence": "Word count table: Amazon 184, Gemini 207, YouTube 212, Canopii 222, WhatsApp 216, Wiz 219."},
+        {"text": "Compares P0 word count against the 300-500 word target from DESIGN.md", "passed": true, "evidence": "'Target: 300-500 words' stated. All compared against this target."},
+        {"text": "Flags any P0 summary that falls outside the 300-500 word target range", "passed": true, "evidence": "'0 of 6 P0 summaries hit 300-word floor. All in 184-222 word band.' All marked FAIL."}
+      ],
+      "notes": ["Both configurations 5/5 — this eval's assertions are not discriminating enough. The task was narrow enough for baseline to handle without skill."]
+    }
+  ],
+
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {"mean": 1.0, "stddev": 0.0, "min": 1.0, "max": 1.0},
+      "time_seconds": {"mean": 216.2, "stddev": 120.6, "min": 128.9, "max": 427.3},
+      "tokens": {"mean": 59937, "stddev": 5813, "min": 50964, "max": 68933}
+    },
+    "without_skill": {
+      "pass_rate": {"mean": 0.56, "stddev": 0.32, "min": 0.2, "max": 1.0},
+      "time_seconds": {"mean": 351.8, "stddev": 128.2, "min": 187.4, "max": 483.3},
+      "tokens": {"mean": 65821, "stddev": 8049, "min": 52962, "max": 72771}
+    },
+    "delta": {
+      "pass_rate": "+0.44",
+      "time_seconds": "-135.6",
+      "tokens": "-5884"
+    }
+  },
+
+  "notes": [
+    "article-count-check passes 5/5 in both configurations — assertions are not discriminating enough for this narrow, focused task. In iteration 2, add assertions that test structured PASS/FAIL output and deeper checks.",
+    "Skill saves ~136s average per run (with_skill 216s vs without_skill 352s) — structured templates reduce exploratory tool use significantly.",
+    "missing-script shows the biggest improvement: 1.0 vs 0.2. The skill's domain knowledge (llama3.2:3b JSON malformation, _clean_json, USE_LOCAL_LLM fallback) cannot be derived from code inspection without MEMORY.md access.",
+    "full-quality-check: with_skill 9 tool calls vs without_skill 8 — almost identical tool usage but radically different output quality (5/5 vs 1/5). The skill's structured template, not more reading, drives the improvement.",
+    "newsflow-add-parser: without_skill took 32 tool calls on et-ai-parser vs 21 with_skill — baseline rewrote the parser when it should have just validated it, wasting effort and modifying production code unnecessarily.",
+    "low-article-count: without_skill 4/5 — strong baseline, close to skill performance. The TLDR weekend publishing schedule is the key differentiator. Add this to the skill's Ingestion failures section more prominently.",
+    "Hallucination risk: without_skill baseline fabricated log contents and non-existent parameters (expansion_mode) in missing-script. The skill's checkpoint-first methodology grounds Claude in real data."
+  ]
+}

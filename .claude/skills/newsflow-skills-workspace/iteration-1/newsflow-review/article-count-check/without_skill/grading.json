@@ -1,0 +1,18 @@
+{
+  "expectations": [
+    {"text": "Reports article count broken down by source (e.g. tldr_ai, tldr_tech, techcrunch, harper_carroll)", "passed": true, "evidence": "Table: TechCrunch 18, TLDR Tech 15, TLDR AI 8, Total 41. Note: missing tldr_dev and harper_carroll from table, but agent noted 'No Harper Carroll, ETtech, ET AI — not fetched for this test run.'"},
+    {"text": "Reads summaries.json and identifies P0 priority summaries specifically", "passed": true, "evidence": "Explicitly identifies and lists all 6 P0 summaries with titles."},
+    {"text": "Reports actual word count for at least one P0 summary", "passed": true, "evidence": "Word count table: Amazon healthcare AI 184, Google Gemini Chrome India 207, YouTube 212, Canopii 222, WhatsApp 216, Google/Wiz 219."},
+    {"text": "Compares P0 word count against the 300-500 word target from DESIGN.md", "passed": true, "evidence": "'Target: 300-500 words' stated. All compared against this target."},
+    {"text": "Flags any P0 summary that falls outside the 300-500 word target range", "passed": true, "evidence": "'0 of 6 P0 summaries hit 300-word floor. All in 184-222 word band (~40-60% of minimum).' All marked FAIL."}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0},
+  "timing": {"executor_duration_seconds": 0, "total_tokens": 0},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "Both with_skill and without_skill passed 5/5 on this eval — the task was narrow enough that the baseline agent could handle it without skill guidance. The assertions may not be discriminating enough for this eval. Consider adding assertions that test for structured PASS/FAIL output or the deeper checks the skill enforces."}
+    ],
+    "overall": "5/5 — the without_skill baseline performed as well as with_skill on this narrow, focused task. Root cause identified (scraper didn't run → no full_text → summaries too short), specific fixes proposed. This eval may need stronger assertions to show skill value."
+  }
+}

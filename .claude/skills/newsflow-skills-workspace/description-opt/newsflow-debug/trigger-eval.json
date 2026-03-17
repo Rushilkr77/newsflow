@@ -1,0 +1,23 @@
+[
+  {"query": "pipeline ran at 5am but workspace/2026-03-16 only has raw_articles.json, nothing after that — what happened?", "should_trigger": true},
+  {"query": "the mp3 came out as 3 minutes instead of the usual 60-90, something is obviously wrong with today's run", "should_trigger": true},
+  {"query": "curated_articles.json has 47 articles but summaries.json only has 12 — where did the rest go?", "should_trigger": true},
+  {"query": "getting FileNotFoundError on ffmpeg when the pipeline tries to produce the final mp3", "should_trigger": true},
+  {"query": "0 articles from ETtech this morning — did the parser break or is there a scraping issue?", "should_trigger": true},
+  {"query": "podcast_script.json is missing entirely from the workspace, pipeline seems to have stalled at stage 4", "should_trigger": true},
+  {"query": "JSONDecodeError at script_writer.py line 892, the llm is spitting out malformed json and retries aren't fixing it", "should_trigger": true},
+  {"query": "audio producer is crashing with 'cp1252' codec can't encode character '\\U0001f680' — was working fine last week", "should_trigger": true},
+  {"query": "full_text is null for every single article in summaries.json today — looks like nothing got scraped", "should_trigger": true},
+  {"query": "pipeline crashed overnight but I can't tell which stage — the logs aren't obvious, can you figure out what went wrong from the workspace files?", "should_trigger": true},
+
+  {"query": "can you explain how the semantic dedup algorithm works in curator.py? i want to understand the threshold", "should_trigger": false},
+  {"query": "review today's episode quality — is the P0 article count hitting the DESIGN.md targets?", "should_trigger": false},
+  {"query": "check how many articles came through from each newsletter source this morning", "should_trigger": false},
+  {"query": "the ETtech parser HTML structure changed, update it to match the new format", "should_trigger": false},
+  {"query": "run the pipeline for today's date", "should_trigger": false},
+  {"query": "add Morning Brew as a new newsletter source to the pipeline", "should_trigger": false},
+  {"query": "we want to increase the priority weight for TLDR AI articles in preferences.yaml", "should_trigger": false},
+  {"query": "how does the checkpoint system work — does it resume from the last successful stage or start over?", "should_trigger": false},
+  {"query": "what's the difference between P0, P1, and P2 in the curation ranking?", "should_trigger": false},
+  {"query": "ettech parser has a bug where it grabs the wrong URL for paywalled articles — can you fix that?", "should_trigger": false}
+]

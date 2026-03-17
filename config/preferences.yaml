@@ -11,11 +11,12 @@ user_profile:
 
 priority_rules:
   P0_must_include:
-    - "Major launches or announcements from big tech (Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft) — product OR model"
-    - "AI products or tools with clear impact on how software is built or used"
+    - "Product or model launch/announcement from: Meta, Apple, NVIDIA, Google (DeepMind included), OpenAI, Anthropic, or Microsoft — own announcements are always P0; credible third-party reporting of a real, verified launch is also P0. NOT eligible: pure opinion/review with no new product info, leaks, rumours, consumer entertainment (games, media, streaming)."
+    - "AI making a significant real-world impact in any domain — tools or systems that change how software is built, agentic AI demonstrating new capabilities, or AI producing a verifiable breakthrough or shift in fields like security, scientific research, medicine, climate, manufacturing, or other industries"
     - "India-specific startups: significant product launch, funding >$10M, or notable founder story"
     - "Non-AI hardware or software representing a genuine direction change (new form factor, platform shift, new category)"
-    - "Funding rounds >$50M in AI space"
+    - "Funding rounds >$50M in the AI space — applies to both established big tech AND emerging AI-native companies such as Cursor, Perplexity, xAI, Mistral, Cohere, Character.AI, Midjourney, Runway, ElevenLabs, Stability AI, and similar players"
+    - "Major product launch, valuation milestone (≥$10B), or high-profile strategic move (acquisition, key executive poaching, major partnership) by a rising AI-native company that is reshaping how software is built or used"
 
   P1_high:
     - "AI products from smaller or emerging startups"
@@ -30,6 +31,8 @@ priority_rules:
     - "Funding <$10M"
     - "Open-source milestones without a clear 'what does this unlock' angle"
     - "Incremental product updates with no significant strategic shift"
+    - "New wearable device launches or major hardware updates (fitness trackers, health wearables, AR/VR/XR headsets, smart rings) — regardless of AI angle; hardware direction shifts matter"
+    - "Major healthcare breakthroughs: significant disease cures, treatments, or medical inventions that could fundamentally change an industry or go mainstream — regardless of tech angle"
 
   P3_skip:
     - "Crypto or Web3 (unless direct AI intersection)"
@@ -37,11 +40,37 @@ priority_rules:
     - "Sponsor or ad content within newsletters"
     - "Incremental consumer hardware with no meaningful leap"
     - "Generic career advice"
+    - "Non-tech content: entertainment, sports, food, travel, lifestyle — even if mentioned by a tech company"
+    - "Articles with titles shorter than 10 characters or titles that are all-uppercase with no spaces (e.g. 'COMPANY', 'TLDRTECH') — these are parsing artifacts"
+
+# Rising AI-native companies — headlines about these companies involving large dollar
+# amounts, product launches, or high-profile strategic events are P0, not P1/P2.
+# Used by the curator to calibrate classification when snippet context is thin.
+emerging_ai_companies:
+  - Cursor
+  - Perplexity
+  - xAI
+  - Mistral
+  - Cohere
+  - Character.AI
+  - Midjourney
+  - Runway
+  - ElevenLabs
+  - Stability AI
+  - Harvey
+  - Poolside
+  - Cognition
+  - Together AI
+  - Groq
+  - Hugging Face
+  - Replit
+  - Codeium
 
 dedup:
   url_match: true
   title_similarity_threshold: 0.85
   content_similarity_threshold: 0.90
+  semantic_dedup_threshold: 0.82
   source_priority_order:
     - harper_carroll
     - et_ai
@@ -54,6 +83,7 @@ dedup:
 
 time_budget:
   target_duration_min: 90
+  min_duration_min: 45  # trigger expansion_mode re-run if script falls below this
   p0_deep_dive:
     duration_min_per_article: "5-7"
     max_articles: 6

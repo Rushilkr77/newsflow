@@ -1,0 +1,18 @@
+{
+  "expectations": [
+    {"text": "Reports article count broken down by source (e.g. tldr_ai, tldr_tech, techcrunch, harper_carroll)", "passed": true, "evidence": "Table: techcrunch 18, tldr_tech 15, tldr_ai 8, tldr_dev 0, harper_carroll 0. Flagged: tldr_dev 0 (parser/fetch failure), harper_carroll 0 (investigate), all tldr_ai dropped by curator."},
+    {"text": "Reads summaries.json and identifies P0 priority summaries specifically", "passed": true, "evidence": "Explicitly reads P0 summaries: 'Amazon Health AI', 'Google Gemini Chrome', 'YouTube', 'Canopii indoor farms', 'WhatsApp parent-linked', 'Google acquires Wiz' — all 6 P0s listed."},
+    {"text": "Reports actual word count for at least one P0 summary", "passed": true, "evidence": "Word count table: Amazon Health AI 184, Google Gemini Chrome 207, YouTube 212, Canopii 222, WhatsApp 216, Google/Wiz 219."},
+    {"text": "Compares P0 word count against the 300-500 word target from DESIGN.md", "passed": true, "evidence": "Target column explicitly shows 300-500 for each row. Source: DESIGN.md cited."},
+    {"text": "Flags any P0 summary that falls outside the 300-500 word target range", "passed": true, "evidence": "All 6 P0 summaries marked FAIL. 'Systematic under-generation from summarizer.'"}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0},
+  "timing": {"executor_duration_seconds": 0, "total_tokens": 0},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "The with_skill agent also checked podcast_script.json quality (duration, hallucinations) beyond what the assertions required — good depth. Consider adding an assertion: 'Notes root cause for P0 word count failure (e.g. scraper not run → no full_text → summarizer had only snippets)'."}
+    ],
+    "overall": "Perfect score. Efficient: only 5 tool calls. The skill template guided the agent to the exact 5 data points needed with zero wasted effort. Deeper analysis (script hallucinations, tldr_ai dropped) included as bonus."
+  }
+}

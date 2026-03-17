@@ -1,0 +1,12 @@
+{
+  "eval_id": 5,
+  "eval_name": "full-quality-check",
+  "prompt": "Can you review today's pipeline output quality? Check the workspace/test/ folder.",
+  "assertions": [
+    "Reads raw_articles.json and reports total article count plus count per source",
+    "Reads curated_articles.json and reports P0/P1/P2/P3 breakdown",
+    "Reads summaries.json and reports word count for at least one summary against target range",
+    "Reads podcast_script.json and reports total_estimated_duration_min",
+    "Produces a structured quality report with an overall PASS / NEEDS ATTENTION / FAIL rating"
+  ]
+}

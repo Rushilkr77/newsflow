@@ -1,0 +1,21 @@
+{
+  "expectations": [
+    {"text": "Reads at least one actual checkpoint file (raw_articles.json or curated_articles.json) before diagnosing", "passed": true, "evidence": "Agent checked workspace/2026-03-14/ checkpoint files and workspace/test/ reference data before diagnosing."},
+    {"text": "Reports article counts at multiple pipeline stages to locate where the drop-off occurs", "passed": true, "evidence": "Funnel table shows Raw (~5-8) → After URL dedup (~4-6) → After title pre-filter (~3) → After classification (3) → After time budget (3)."},
+    {"text": "Identifies the correct stage where the count collapsed (ingestion vs. curation vs. scraping)", "passed": true, "evidence": "Correctly identified ingestion stage: 'TLDR newsletters don't publish on weekends.' Today is Sunday 2026-03-15 — no TLDR emails in Gmail query."},
+    {"text": "Gives a concrete, specific root cause — not vague advice like 'check the logs'", "passed": true, "evidence": "Root cause: TLDR AI/Tech/Dev don't send Saturday issues → zero TLDR articles. Gmail query uses newer_than:1d covering only March 14 (Saturday)."},
+    {"text": "Provides an actionable fix with a specific file or command to run", "passed": true, "evidence": "Fix: Set lookback_days: 3 for all TLDR senders in config/senders.yaml lines 16, 25, 34. Verification command provided."}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0},
+  "timing": {"executor_duration_seconds": 483.3, "total_tokens": 72771},
+  "claims": [
+    {"claim": "Gmail query uses newer_than:1d", "type": "factual", "verified": true, "evidence": "Consistent with ingestion.py lookback_days behavior."},
+    {"claim": "Harper Carroll set to include_weekdays: [4] (Friday only)", "type": "factual", "verified": false, "evidence": "Cited as senders.yaml line 52 — not independently verified."}
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "The skill's weekend-awareness is the key differentiator here. The with_skill agent knew to check the date and identify TLDR's weekend publishing schedule. This is domain knowledge that should stay in the skill."}
+    ],
+    "overall": "Perfect score. The skill's TLDR weekend publishing note directly caused the correct diagnosis. The agent read real checkpoint data, traced the drop to ingestion, identified Sunday as the cause, and gave a precise config fix."
+  }
+}

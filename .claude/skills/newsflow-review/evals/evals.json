@@ -1,0 +1,31 @@
+{
+  "skill_name": "newsflow-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Can you review today's pipeline output quality? Check the workspace/test/ folder.",
+      "expected_output": "Skill produces a structured quality report: article funnel (raw→curated P0/P1/P2→summaries→script duration), source coverage per newsletter, spot-checked summary word counts vs targets, script segment coverage, overall pass/fail rating.",
+      "files": [],
+      "expectations": [
+        "Reads raw_articles.json and reports total article count and count per source",
+        "Reads curated_articles.json and reports P0/P1/P2/P3 breakdown",
+        "Reads summaries.json and checks at least one summary word count against the target range",
+        "Reads podcast_script.json and reports the total_estimated_duration_min",
+        "Produces a structured report with an overall PASS/NEEDS ATTENTION/FAIL rating"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "How many articles did we get from each newsletter today? And did the P0 summaries hit their word count targets? Check workspace/test/.",
+      "expected_output": "Per-source article counts from raw_articles.json, word count analysis of P0 summaries from summaries.json compared against the 300-500 word target from DESIGN.md.",
+      "files": [],
+      "expectations": [
+        "Reports article count broken down by source (tldr_ai, tldr_tech, tldr_dev, techcrunch, harper_carroll)",
+        "Reads summaries.json and finds P0 summaries specifically",
+        "Reports word count for at least one P0 summary",
+        "Compares P0 word count against the 300-500 word target",
+        "Flags any P0 summary that falls outside the target range"
+      ]
+    }
+  ]
+}

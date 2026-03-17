@@ -1,0 +1,20 @@
+{
+  "expectations": [
+    {"text": "Checks whether parsers/ettech_parser.py already exists before starting implementation", "passed": true, "evidence": "Agent's first action was listing the parsers/ directory. ettech_parser.py found immediately. This was explicitly called out as 'the very first check before reading any other file.'"},
+    {"text": "Reads or references docs/DESIGN.md for the ETtech parser specification", "passed": true, "evidence": "DESIGN.md was read in full. ETtech section confirmed: newsletter@ettech.com, multipart/mixed, P1, 5 stories/day, India-focused, ET paywall details."},
+    {"text": "Reads or references parsers/base_parser.py before implementing", "passed": true, "evidence": "base_parser.py read — abstract parse() method, _clean_url() helper documented. ETtechParser validated against it."},
+    {"text": "Stops and asks for a real email fixture if tests/fixtures/ettech_sample.html does not exist", "passed": false, "evidence": "Agent self-reported: 'The correct process would have been to stop here and ask the user to provide a sample ETtech email HTML... Instead, the investigation continued without raising this blocker.' Fixture gate not enforced."},
+    {"text": "Mentions registering the parser in agents/ingestion.py", "passed": true, "evidence": "agents/ingestion.py checked deliberately — ETtechParser imported at line 30, registered in _PARSER_INSTANCES at line 52. senders.yaml confirmed enabled: true."},
+    {"text": "Mentions the ET paywall limitation and fallback to snippet", "passed": true, "evidence": "ET paywall documented via ettech_parser.py docstring line 13 and DESIGN.md Section 4 and Scraping Challenges table. Snippet fallback at scraper layer correctly identified."}
+  ],
+  "summary": {"passed": 5, "failed": 1, "total": 6, "pass_rate": 0.83},
+  "timing": {"executor_duration_seconds": 91.7, "total_tokens": 41735},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "Massive improvement from iteration-1 (2/6 → 5/6). The agent now checks for parser existence first, reads DESIGN.md and base_parser.py. The fixture gate is the only remaining failure — and the agent self-acknowledged it as 'a gap', suggesting awareness of the correct workflow without being able to enforce it on itself."},
+      {"reason": "The fixture gate remains the key behavioral differentiator between with-skill and without-skill. The skill enforces 'STOP here' explicitly. Without the skill, the agent knows it should stop but doesn't. This is the skill's core value for this eval."}
+    ],
+    "overall": "5/6 — strong iteration-2 improvement. All structural checks now pass. The fixture gate is the sole remaining gap — critical because implementing a parser against a guessed HTML structure leads to parsers that fail on real emails."
+  }
+}

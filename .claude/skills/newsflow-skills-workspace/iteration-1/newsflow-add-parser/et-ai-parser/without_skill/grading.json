@@ -1,0 +1,19 @@
+{
+  "expectations": [
+    {"text": "Identifies variant detection requirement: filter by From display name 'ET AI' or subject prefix 'ET AI:'", "passed": true, "evidence": "senders.yaml updated with 'variant_detection: from_display_name, display_name_match: ET AI, subject_prefix: ET AI:' — variant detection correctly identified and configured."},
+    {"text": "References an existing parser (e.g. harper_carroll or techcrunch) as implementation guide", "passed": false, "evidence": "Agent self-reported: 'Referenced existing parser as guide — NOT explicitly mentioned ✗'. Agent read parsers but did not reference them as guides in implementation rationale."},
+    {"text": "Addresses the table-of-contents-then-teasers structure and how to parse it", "passed": true, "evidence": "Design decisions section: '_is_toc_link(href) — Skips hrefs starting with # or lacking http scheme' and '_find_story_container()' — TOC detection mechanism explicitly designed and described."},
+    {"text": "Produces ETAIParser class or a concrete implementation plan with method signatures", "passed": true, "evidence": "Full rewrite of parsers/et_ai_parser.py with 6 named methods: _is_toc_link(), _find_story_container(), _extract_title_and_snippet(), _clean_url(), plus extraction_confidence=0.8 approach."},
+    {"text": "Mentions ET paywall handling — use snippet if article scrape fails", "passed": true, "evidence": "'extraction_confidence=0.8 — Flags paywall-gated articles for scraper fallback.' Paywall strategy explicitly addressed."}
+  ],
+  "summary": {"passed": 4, "failed": 1, "total": 5, "pass_rate": 0.8},
+  "timing": {"executor_duration_seconds": 0, "total_tokens": 0},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "Without skill: did NOT read DESIGN.md spec, did NOT mention needing a real email fixture before implementation, did NOT mention tests/fixtures/ workflow. But produced a more thorough implementation (full rewrite with _find_story_container walk-up, _is_toc_link, etc.) using 32 tool calls vs with_skill's 21. The trade-off: without skill produces more code faster but skips the validation workflow."},
+      {"reason": "The fixture-gate check is a critical workflow step the without_skill agent skipped. This is the most important behavioral difference — the skill enforces 'don't implement without a real sample email.' Add this as an assertion in iteration 2."}
+    ],
+    "overall": "4/5 — strong implementation but skipped the systematic workflow (no DESIGN.md read, no fixture gate). Without skill went further in code quality (better method decomposition, more defensive implementation) but bypassed important validation steps that prevent implementing parsers for unknown email formats."
+  }
+}

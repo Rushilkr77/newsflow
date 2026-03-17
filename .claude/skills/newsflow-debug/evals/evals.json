@@ -1,0 +1,31 @@
+{
+  "skill_name": "newsflow-debug",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "The pipeline ran this morning but curated_articles.json only has 3 articles when it normally has 25+. Something's wrong.",
+      "expected_output": "Skill guides through: checking raw_articles.json count first, comparing raw vs curated drop-off, identifying curator as the failure point, checking P0/P1/P2/P3 breakdown, suggesting specific root cause (LLM classifying everything P3, Ollama model issue, malformed prompt).",
+      "files": [],
+      "expectations": [
+        "Instructs to check raw_articles.json article count before diagnosing the curator",
+        "Identifies the curator stage as the likely failure point given the raw-to-curated drop-off",
+        "Mentions checking P0/P1/P2/P3 breakdown in curated_articles.json",
+        "References specific potential causes: LLM classifying as P3, Ollama not running, or broken prompt",
+        "Provides a concrete next step — not just 'check the logs' vaguely"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "podcast_script.json is missing from workspace/2026-03-14/ but summaries.json is there with 18 summaries. What happened?",
+      "expected_output": "Skill identifies Script Writer as the failed stage, references JSON malformation from llama3.2:3b as primary suspect, mentions _clean_json() and _MAX_RETRIES, and gives specific debugging steps.",
+      "files": [],
+      "expectations": [
+        "Correctly identifies Script Writer as the failed stage (summaries exist but script is missing)",
+        "References JSON malformation from llama3.2:3b as the primary suspect",
+        "Mentions _clean_json() or _MAX_RETRIES in script_writer.py as relevant",
+        "Suggests checking if Anthropic API fallback is available as an alternative",
+        "Does not suggest re-running the whole pipeline from scratch unnecessarily"
+      ]
+    }
+  ]
+}

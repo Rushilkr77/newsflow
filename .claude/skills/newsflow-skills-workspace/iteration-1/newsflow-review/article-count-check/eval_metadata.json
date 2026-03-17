@@ -1,0 +1,12 @@
+{
+  "eval_id": 6,
+  "eval_name": "article-count-check",
+  "prompt": "How many articles did we get from each newsletter today? And did the P0 summaries hit their word count targets? Check workspace/test/.",
+  "assertions": [
+    "Reports article count broken down by source (e.g. tldr_ai, tldr_tech, techcrunch, harper_carroll)",
+    "Reads summaries.json and identifies P0 priority summaries specifically",
+    "Reports actual word count for at least one P0 summary",
+    "Compares P0 word count against the 300-500 word target from DESIGN.md",
+    "Flags any P0 summary that falls outside the 300-500 word target range"
+  ]
+}

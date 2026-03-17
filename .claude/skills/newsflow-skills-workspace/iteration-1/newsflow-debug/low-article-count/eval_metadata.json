@@ -1,0 +1,12 @@
+{
+  "eval_id": 3,
+  "eval_name": "low-article-count",
+  "prompt": "The pipeline ran this morning but curated_articles.json only has 3 articles when it normally has 25+. Something's wrong.",
+  "assertions": [
+    "Reads at least one actual checkpoint file (raw_articles.json or curated_articles.json) before diagnosing",
+    "Reports article counts at multiple pipeline stages to locate where the drop-off occurs",
+    "Identifies the correct stage where the count collapsed (ingestion vs. curation vs. scraping)",
+    "Gives a concrete, specific root cause — not vague advice like 'check the logs'",
+    "Provides an actionable fix with a specific file or command to run"
+  ]
+}

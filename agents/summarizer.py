@@ -18,13 +18,19 @@ import structlog
 
 from mcp_servers.article_fetcher_server import fetch_article_content
 from models.article import ArticleSummary, CuratedArticle
-from models.enums import Priority
+from models.enums import Priority, Source
+from scraper.inc42_scraper import Inc42Scraper
 from utils.llm_client import chat
 
 log = structlog.get_logger(__name__)
 
 # Model for summarization (7B for better structured output quality)
 _SUMMARIZER_LOCAL_MODEL = os.getenv("SUMMARIZER_LOCAL_MODEL")
+
+# Sources whose articles are typically behind the ET paywall
+_ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
+
+_inc42_scraper = Inc42Scraper()
 
 
 class SummarizerAgent:
@@ -58,9 +64,22 @@ class SummarizerAgent:
 
         for article in to_fetch:
             text = fetch_article_content(str(article.url))
-            if text:
+            if text and len(text) >= 200:
                 article.full_text = text
                 log.debug("article_fetched", article_id=article.id, chars=len(text))
+            elif article.source in _ET_SOURCES:
+                # ET articles are often paywalled — try Inc42 as a fallback
+                inc42_text = _inc42_scraper.search_and_fetch(article.title)
+                if inc42_text:
+                    article.full_text = inc42_text
+                    log.info(
+                        "inc42_fallback_used",
+                        article_id=article.id,
+                        title=article.title[:60],
+                        chars=len(inc42_text),
+                    )
+                else:
+                    log.debug("fetch_fallback_to_snippet", article_id=article.id)
             else:
                 log.debug("fetch_fallback_to_snippet", article_id=article.id)
 

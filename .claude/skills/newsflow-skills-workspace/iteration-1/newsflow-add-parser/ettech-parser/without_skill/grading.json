@@ -1,0 +1,16 @@
+{
+  "expectations": [
+    {"text": "References docs/DESIGN.md ETtech parser section before writing code", "passed": false, "evidence": "Response explicitly notes: 'Did not reference DESIGN.md ETtech spec'"},
+    {"text": "References parsers/base_parser.py to understand the interface to implement", "passed": false, "evidence": "Not mentioned anywhere in the response"},
+    {"text": "Mentions needing a real email fixture before starting implementation", "passed": false, "evidence": "Response explicitly notes: 'Did not mention needing a real email fixture' — dove straight to enabling the existing parser"},
+    {"text": "Produces an ETtechParser class that inherits from BaseParser", "passed": true, "evidence": "Agent found pre-existing class and confirmed it: 'Complete ETtechParser class... inherits BaseParser'"},
+    {"text": "Mentions registering the parser in agents/ingestion.py", "passed": false, "evidence": "Response notes 'Did not mention registering in ingestion.py (just found it was there)' — found incidentally, not addressed as a deliberate step"},
+    {"text": "Mentions ET paywall limitation and snippet fallback strategy", "passed": true, "evidence": "'Mentioned ET paywall caveat briefly at the end'"}
+  ],
+  "summary": {"passed": 2, "failed": 4, "total": 6, "pass_rate": 0.33},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [],
+    "overall": "Baseline skipped the systematic workflow: no DESIGN.md read, no fixture gate, no base_parser.py reference. Found the existing implementation but treated it as a checkbox task rather than a validation exercise."
+  }
+}

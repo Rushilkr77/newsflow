@@ -20,9 +20,13 @@ lxml>=5.0
 trafilatura>=1.8
 newspaper3k>=0.2
 
+# Embeddings (semantic dedup)
+sentence-transformers>=2.7
+
 # TTS (Phase 1)
 gTTS>=2.5
 pydub>=0.25
+pyloudnorm>=0.1.1
 
 # Logging
 structlog>=24.0

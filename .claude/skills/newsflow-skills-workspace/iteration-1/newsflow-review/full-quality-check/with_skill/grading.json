@@ -1,0 +1,21 @@
+{
+  "expectations": [
+    {"text": "Reads raw_articles.json and reports total article count plus count per source", "passed": true, "evidence": "Raw: 42. Per-source: tldr_tech: 9, techcrunch: 25, tldr_ai: 8, tldr_dev: 0, harper_carroll: 0 (Sunday). Source coverage check flagged tldr_ai 0 curated and tldr_dev 0 raw."},
+    {"text": "Reads curated_articles.json and reports P0/P1/P2/P3 breakdown", "passed": true, "evidence": "Curated 23: P0:6 P1:10 P2:7 P3:0. Explicitly stated in Article Funnel section."},
+    {"text": "Reads summaries.json and reports word count for at least one summary against target range", "passed": true, "evidence": "Google acquires Wiz $32B: 219 words ✗ (target 300-500). All 6 P0 summaries: 184-222 words — systematically below minimum."},
+    {"text": "Reads podcast_script.json and reports total_estimated_duration_min", "passed": true, "evidence": "Duration: 12 min ✗ (target 60-90 min — 5x too short). Reported prominently in both funnel and script quality sections."},
+    {"text": "Produces a structured quality report with an overall PASS / NEEDS ATTENTION / FAIL rating", "passed": true, "evidence": "Overall: FAIL — stated explicitly at end of report with 11 numbered issues ranked CRITICAL/HIGH/MEDIUM/LOW."}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0},
+  "timing": {"executor_duration_seconds": 0, "total_tokens": 0},
+  "claims": [
+    {"claim": "Cold open references hallucinated story not in any checkpoint", "type": "factual", "verified": false, "evidence": "Reported from reading podcast_script.json — plausible given known hallucination issues but not independently verified."},
+    {"claim": "india_tech and closing contain fabricated content (NovaSparks)", "type": "factual", "verified": false, "evidence": "Consistent with without_skill baseline which also found NovaSparks — high confidence."}
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "Both the with_skill and without_skill agents found 'NovaSparks' as hallucinated content — this is a real data point in the test data. Consider adding an assertion that checks for hallucination detection: 'Identifies at least one instance where script_writer fabricated content not present in source summaries.'"}
+    ],
+    "overall": "Perfect score. The skill's structured review template (Article Funnel → Source Coverage → Summary Quality → Script Quality → Issues → Overall Rating) produced a clean, actionable report covering all 5 assertions efficiently with only 9 tool calls."
+  }
+}

@@ -8,6 +8,7 @@ structured JSON output. Falls back to LOCAL_LLM_MODEL if not set.
 """
 import json
 import os
+import re
 import uuid
 from urllib.parse import urlparse, urlunparse
 
@@ -41,12 +42,21 @@ _CURATOR_LOCAL_MODEL = os.getenv("CURATOR_LOCAL_MODEL")
 class CuratorAgent:
     def __init__(self):
         self._prefs = self._load_prefs()
+        self._embed_model = None  # lazy-loaded on first semantic dedup call
 
     def run(self, raw_articles: list[RawArticle]) -> list[CuratedArticle]:
         log.info("curator_start", input_count=len(raw_articles))
 
         deduped = self._url_dedup(raw_articles)
         log.info("url_dedup_complete", count=len(deduped))
+
+        # Semantic dedup: merge stories that are the same topic but have different URLs
+        sem_deduped_articles = self._semantic_dedup([item["article"] for item in deduped])
+        # Rebuild the deduped list, preserving all_sources/dedup_group_id for kept articles
+        kept_ids = {a.id for a in sem_deduped_articles}
+        deduped = [item for item in deduped if item["article"].id in kept_ids]
+
+        deduped = self._mark_cross_source_overlap(deduped)
 
         curated = self._classify(deduped)
         log.info("classification_complete", count=len(curated))
@@ -55,6 +65,68 @@ class CuratorAgent:
         log.info("time_budget_applied", final_count=len(final))
 
         return final
+
+    # -------------------------------------------------------------------------
+    # Cross-source overlap detection
+    # -------------------------------------------------------------------------
+
+    _TITLE_STOP_WORDS: frozenset = frozenset({
+        "the", "a", "an", "in", "of", "to", "for", "on", "at", "by", "is", "are",
+        "was", "be", "has", "had", "have", "with", "and", "or", "but", "its", "it",
+        "this", "that", "new", "how", "why", "what", "who", "all", "more", "from",
+    })
+
+    def _title_keywords(self, title: str) -> frozenset:
+        """Significant keywords from a title (lowercase, no stop words, len≥3)."""
+        words = re.sub(r"[^a-z0-9\s]", "", title.lower()).split()
+        return frozenset(w for w in words if len(w) >= 3 and w not in self._TITLE_STOP_WORDS)
+
+    def _title_jaccard(self, kw_a: frozenset, kw_b: frozenset) -> float:
+        if not kw_a or not kw_b:
+            return 0.0
+        return len(kw_a & kw_b) / len(kw_a | kw_b)
+
+    def _mark_cross_source_overlap(self, deduped: list[dict]) -> list[dict]:
+        """
+        Flag HC articles as context_only when they cover the same story as any
+        TLDR article in the same batch. TLDR is daily so always 'earlier' than
+        HC's weekly issue — the HC version becomes editorial context, not news.
+
+        Algorithm: Jaccard similarity on significant title keywords ≥ 0.30.
+        Effect: priority is capped at P1 after LLM classification.
+        """
+        _HC = "harper_carroll"
+        _TLDR_SOURCES = {"tldr_ai", "tldr_tech", "tldr_dev"}
+
+        # Pre-compute keyword sets for all TLDR articles in this batch
+        tldr_kw_sets: list[frozenset] = [
+            self._title_keywords(item["article"].title or "")
+            for item in deduped
+            if item["article"].source.value in _TLDR_SOURCES
+        ]
+
+        if not tldr_kw_sets:
+            return deduped  # no TLDR articles to compare against
+
+        _OVERLAP_THRESHOLD = 0.30
+
+        for item in deduped:
+            if item["article"].source.value != _HC:
+                continue
+            hc_kw = self._title_keywords(item["article"].title or "")
+            best = max(
+                (self._title_jaccard(hc_kw, tkw) for tkw in tldr_kw_sets),
+                default=0.0,
+            )
+            if best >= _OVERLAP_THRESHOLD:
+                item["context_only"] = True
+                log.info(
+                    "hc_context_only_flagged",
+                    title=item["article"].title[:60],
+                    jaccard=round(best, 2),
+                )
+
+        return deduped
 
     # -------------------------------------------------------------------------
     # Deduplication
@@ -102,17 +174,122 @@ class CuratorAgent:
         except ValueError:
             return len(_SOURCE_PRIORITY)
 
+    def _semantic_dedup(self, articles: list[RawArticle]) -> list[RawArticle]:
+        """
+        Remove near-duplicate articles that cover the same story but have different URLs.
+        Uses sentence-transformers to embed titles and computes cosine similarity.
+        Groups with similarity >= semantic_dedup_threshold are merged: the article from
+        the highest-priority source is kept; ties broken by longer snippet.
+        """
+        if len(articles) <= 1:
+            return articles
+
+        try:
+            import numpy as np
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            log.warning(
+                "semantic_dedup_skipped",
+                reason="sentence_transformers or numpy not installed",
+            )
+            return articles
+
+        threshold: float = (
+            self._prefs.get("dedup", {}).get("semantic_dedup_threshold", 0.82)
+        )
+
+        # Lazy-load and cache the embedding model
+        if not hasattr(self, "_embed_model") or self._embed_model is None:
+            self._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+        titles = [a.title for a in articles]
+        raw_embs = self._embed_model.encode(titles, convert_to_numpy=True)
+
+        # L2-normalise so dot product == cosine similarity
+        norms = np.linalg.norm(raw_embs, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)  # avoid divide-by-zero
+        embs = raw_embs / norms
+
+        sim_matrix = np.dot(embs, embs.T)
+
+        n = len(articles)
+        merged_into: dict[int, int] = {}  # idx -> representative idx
+
+        for i in range(n):
+            if i in merged_into:
+                continue
+            for j in range(i + 1, n):
+                if j in merged_into:
+                    continue
+                if sim_matrix[i, j] >= threshold:
+                    # Determine which to keep: higher source priority wins
+                    rank_i = self._source_rank(articles[i].source.value)
+                    rank_j = self._source_rank(articles[j].source.value)
+                    if rank_i <= rank_j:
+                        # keep i, drop j
+                        merged_into[j] = i
+                    else:
+                        # keep j, drop i — but we need to re-root i's group to j
+                        merged_into[i] = j
+                        # also remap anything already merged into i
+                        for k, v in list(merged_into.items()):
+                            if v == i:
+                                merged_into[k] = j
+
+        # Build set of representative indices (those NOT dropped)
+        dropped = set(merged_into.keys())
+        representatives = [i for i in range(n) if i not in dropped]
+
+        result = [articles[i] for i in representatives]
+
+        log.info(
+            "semantic_dedup_complete",
+            before=len(articles),
+            after=len(result),
+            merged=len(articles) - len(result),
+        )
+        return result
+
     # -------------------------------------------------------------------------
     # LLM Classification
     # -------------------------------------------------------------------------
+
+    def _is_garbage_title(self, title: str) -> bool:
+        """
+        Return True for titles that are clearly parsing artifacts, not real articles.
+        - Too short (< 10 chars) — e.g. empty string, "AI", "Tech"
+        - All-uppercase with no spaces — e.g. "COMPANY", "TLDRTECH" (placeholder text)
+        """
+        t = title.strip()
+        if len(t) < 10:
+            return True
+        if t.isupper() and " " not in t:
+            return True
+        return False
 
     def _classify(self, deduped: list[dict]) -> list[CuratedArticle]:
         """Classify articles in batches of 8 using qwen2.5:3b."""
         results: list[CuratedArticle] = []
         batch_size = 8
 
-        for i in range(0, len(deduped), batch_size):
-            batch = deduped[i : i + batch_size]
+        # Pre-filter garbage titles — skip LLM call entirely, auto-assign P3
+        to_classify = []
+        for item in deduped:
+            title = item["article"].title or ""
+            if self._is_garbage_title(title):
+                log.info("title_prefilter_skip", title=repr(title))
+                # Don't add to results — P3 articles are excluded downstream anyway
+            else:
+                to_classify.append(item)
+
+        log.info(
+            "title_prefilter_done",
+            skipped=len(deduped) - len(to_classify),
+            remaining=len(to_classify),
+        )
+
+        for i in range(0, len(to_classify), batch_size):
+            batch = to_classify[i : i + batch_size]
             try:
                 classified = self._classify_batch(batch)
                 results.extend(classified)
@@ -159,7 +336,7 @@ Return ONLY a JSON array (no markdown, no explanation):
             model_hint="claude-haiku-4-5",
             system=system_prompt,
             user=user_prompt,
-            max_tokens=2048,
+            max_tokens=3072,  # bumped from 2048 — longer system prompt + 8 articles needs more room
             local_model_override=_CURATOR_LOCAL_MODEL,
         )
 
@@ -183,6 +360,23 @@ Return ONLY a JSON array (no markdown, no explanation):
                 priority = Priority.P2
                 category = Category.ENGINEERING_TECH
 
+            is_context_only = bool(item.get("context_only"))
+
+            # Context-only HC articles (same story already in TLDR): cap at P1.
+            # They provide editorial depth but aren't breaking news for this run.
+            if is_context_only and priority == Priority.P0:
+                log.info(
+                    "hc_context_only_capped",
+                    title=a.title[:60],
+                    original_priority="P0",
+                    capped_to="P1",
+                )
+                priority = Priority.P1
+
+            relevance_score = float(item_data.get("relevance_score", 50))
+            if is_context_only:
+                relevance_score = max(0.0, relevance_score - 15)
+
             curated_articles.append(
                 CuratedArticle(
                     id=a.id,
@@ -191,7 +385,7 @@ Return ONLY a JSON array (no markdown, no explanation):
                     source=a.source,
                     all_sources=item["all_sources"],
                     priority=priority,
-                    relevance_score=float(item_data.get("relevance_score", 50)),
+                    relevance_score=relevance_score,
                     category=category,
                     dedup_group_id=item.get("dedup_group_id"),
                     estimated_podcast_duration_sec=int(
@@ -199,6 +393,7 @@ Return ONLY a JSON array (no markdown, no explanation):
                     ),
                     snippet=a.snippet,
                     discussion_hooks=item_data.get("discussion_hooks", []),
+                    context_only=is_context_only,
                 )
             )
 
@@ -213,8 +408,17 @@ Return ONLY a JSON array (no markdown, no explanation):
         p2 = "\n".join(f"  - {r}" for r in rules.get("P2_if_space", []))
         p3 = "\n".join(f"  - {r}" for r in rules.get("P3_skip", []))
 
-        return f"""You are a content classifier for a daily AI/tech news podcast.
+        emerging = p.get("emerging_ai_companies", [])
+        emerging_str = ", ".join(emerging) if emerging else ""
+
+        prompt = f"""You are a content classifier for a daily AI/tech news podcast.
 The listener is a {p['user_profile']['role']}.
+
+CLASSIFICATION RULE — Title first:
+Classify primarily based on the TITLE. The snippet is supplementary context.
+If the title mentions: a dollar amount ≥$50M, a product launch from a known AI company,
+or a high-profile event (acquisition, exec poaching, major partnership) — treat it as
+important EVEN IF the snippet is thin or vague. Use the snippet to confirm/refine, not override.
 
 Priority rules:
 P0 — Must include (deep dive, 5-7 min):
@@ -230,14 +434,24 @@ P3 — Skip entirely:
 {p3}
 
 Categories:
-- big_tech_launches: Major launches or announcements from Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft — product OR model
-- ai_products_tools: AI-powered products and tools from startups or big tech that change how software is built
+- big_tech_launches: Launches or announcements from Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft — product, model, or acquisition
+- ai_products_tools: AI-powered products, tools, or systems with real-world impact — developer tools, agentic AI, AI applied to security/science/medicine/other domains
 - product_innovations: Non-AI products/hardware representing a real direction change (new form factor, platform, category)
-- india_startups: Indian startup ecosystem — founders, product launches, local funding, policy
+- india_startups: Indian startup ecosystem — ONLY companies founded or headquartered in India
 - funding_ma: Funding rounds, M&A, acquisitions, valuations
 - industry_strategy: SaaS disruption, go-to-market moves, Series B+ company strategy
 - engineering_tech: Technical deep dives, infra, open source (no product angle) — typically P2
 - policy_safety: Regulations, AI safety, government policy, compliance — typically P2"""
+
+        if emerging_str:
+            prompt += f"""
+
+Rising AI-native companies (same importance tier as big tech for major events):
+{emerging_str}
+Headlines about these companies with large funding (≥$50M), product launches, or
+strategic moves (acquisitions, exec poaching) are P0 — not P1 or P2."""
+
+        return prompt
 
     def _fallback_curated(self, item: dict) -> CuratedArticle:
         a = item["article"]

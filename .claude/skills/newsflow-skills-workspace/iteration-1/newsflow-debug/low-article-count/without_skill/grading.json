@@ -1,0 +1,18 @@
+{
+  "expectations": [
+    {"text": "Reads at least one actual checkpoint file (raw_articles.json or curated_articles.json) before diagnosing", "passed": true, "evidence": "Agent read workspace/2026-03-14/logs/2_curation.txt (66 raw → 26 curated) and workspace/2026-03-09/ logs before diagnosing."},
+    {"text": "Reports article counts at multiple pipeline stages to locate where the drop-off occurs", "passed": true, "evidence": "Reports 66 raw → 26 curated (normal run) and 9 raw → 9 curated (weekend example). Multi-stage breakdown given."},
+    {"text": "Identifies the correct stage where the count collapsed (ingestion vs. curation vs. scraping)", "passed": false, "evidence": "Agent gave conditional guidance ('if raw ~3: ingestion problem; if raw 25+ but curated 3: curator failure') but did not identify the actual root cause (Sunday/no TLDR). Root cause was listed as 'LLM aggressively classifying as P3'."},
+    {"text": "Gives a concrete, specific root cause — not vague advice like 'check the logs'", "passed": true, "evidence": "Gave specific root causes: LLM classifying as P3, Ollama returning partial JSON with P3, CURATOR_LOCAL_MODEL pointing to missing model. Concrete and specific, though incorrect for this scenario."},
+    {"text": "Provides an actionable fix with a specific file or command to run", "passed": true, "evidence": "Recovery command: 'del workspace/{date}/curated_articles.json... python -m orchestrator.pipeline --date {date}' — specific and actionable."}
+  ],
+  "summary": {"passed": 4, "failed": 1, "total": 5, "pass_rate": 0.8},
+  "timing": {"executor_duration_seconds": 483.3, "total_tokens": 72771},
+  "claims": [],
+  "eval_feedback": {
+    "suggestions": [
+      {"reason": "Without skill agent did well on methodology but couldn't identify the actual root cause (Sunday/TLDR) without domain knowledge of TLDR's publishing schedule. The skill's value is encoding this NewsFlow-specific knowledge. Consider adding assertion: 'Considers date/day-of-week as a factor when ingestion count is low'."}
+    ],
+    "overall": "Strong baseline but missed the actual root cause. Good methodology: read real checkpoints, identified ingestion as primary suspect (conditionally), gave concrete fixes. The skill's key value here is the TLDR weekend knowledge that lets Claude skip directly to the correct diagnosis."
+  }
+}

@@ -25,12 +25,17 @@ from models.enums import Source
 from parsers.base_parser import BaseParser
 
 
-_SECTION_PRIORITIES = {
-    "top 3": "top3",
-    "must-reads": "must_reads",
-    "must reads": "must_reads",
-    "last but not least": "last_but_not_least",
-}
+# Section header prefixes in order of specificity (longer first to avoid partial matches)
+# Each entry: (prefix_to_match, section_id)
+_SECTION_HEADERS: list[tuple[str, str]] = [
+    ("techcrunch top 3", "top3"),
+    ("top 3", "top3"),
+    ("morning must-reads", "must_reads"),
+    ("afternoon must-reads", "must_reads"),
+    ("must-reads", "must_reads"),
+    ("must reads", "must_reads"),
+    ("last but not least", "last_but_not_least"),
+]
 
 
 class TechCrunchParser(BaseParser):
@@ -42,27 +47,25 @@ class TechCrunchParser(BaseParser):
         soup = BeautifulSoup(email_body, "lxml")
         articles: list[RawArticle] = []
 
-        # Walk through all text nodes looking for section headers and article blocks
         current_section = "must_reads"
 
-        # Find all <a> tags with "Read More" text — these are article links
-        # But we need title and snippet too, so parse the surrounding structure
-
-        # Strategy: find all text blocks that contain article info
-        # TechCrunch emails use <td> cells for each article
         for td in soup.find_all("td"):
             text = td.get_text(separator=" ", strip=True)
-
-            # Detect section headers
             text_lower = text.lower()
-            for header_text, section_id in _SECTION_PRIORITIES.items():
-                if text_lower.strip() == header_text or text_lower.startswith(header_text + " "):
-                    current_section = section_id
-                    break
 
             # Skip sponsor blocks
             if "a message from" in text_lower or "(sponsor)" in text_lower:
                 continue
+
+            # Detect section header prefix — update section and strip from text body.
+            # Handles compound headers like "TechCrunch Top 3 Article Title : ..."
+            # and standalone headers like "Morning Must-Reads".
+            body_text = text
+            for header, section_id in _SECTION_HEADERS:
+                if text_lower.startswith(header):
+                    current_section = section_id
+                    body_text = text[len(header):].strip()
+                    break
 
             # Look for "Read More" link within this cell
             read_more = td.find("a", string=re.compile(r"read\s+more", re.IGNORECASE))
@@ -77,7 +80,7 @@ class TechCrunchParser(BaseParser):
 
             # Extract title and snippet from the text before "Read More"
             # Pattern: "Article Title : One sentence summary. Read More"
-            full_text = text.replace("Read More", "").strip()
+            full_text = body_text.replace("Read More", "").strip()
             if " : " in full_text:
                 parts = full_text.split(" : ", 1)
                 title = parts[0].strip()

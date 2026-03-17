@@ -24,18 +24,38 @@
 
 ---
 
-## Model Strategy & Cost
+## Model Strategy
+
+### Local Ollama (primary — free, GTX 1650 Ti 4GB VRAM)
+
+| Agent | Model | VRAM | Reason |
+|-------|-------|------|--------|
+| Curator (classification) | `qwen2.5:3b` | ~1.9 GB | Best 3B for structured JSON output; classification is rule-following, 7B adds no quality |
+| Summarizer (all tiers) | `qwen2.5:7b` | ~4.7 GB* | Extra params pay off for word-count discipline and dual-lens depth in P0 summaries |
+| Script Writer | `llama3.2:3b` | ~2.0 GB | Meta's English-optimized training produces noticeably more natural podcast narrative than qwen at any size |
+
+*qwen2.5:7b overflows 4GB VRAM → CPU offloading (~8 tok/sec). Acceptable since the pipeline runs in the morning with no time constraint.
+
+**Estimated daily cost: $0.00** (local inference only)
+
+**Per-agent model override**: Each agent reads its model from env (`CURATOR_LOCAL_MODEL`, `SUMMARIZER_LOCAL_MODEL`, `SCRIPT_LOCAL_MODEL`) and passes it as `local_model_override` to `chat()`. Global `LOCAL_LLM_MODEL` is the fallback default.
+
+To pull models (if not already downloaded):
+```bash
+ollama pull qwen2.5:3b
+ollama pull llama3.2:3b
+# qwen2.5:7b — already installed
+```
+
+### Anthropic API (fallback — set USE_LOCAL_LLM=false in .env)
 
 | Agent | Model | Reason |
 |-------|-------|--------|
-| Curator (classification) | Claude Haiku 4.5 | Structured JSON output, cheap, ~$0.05/day |
-| Summarizer (all tiers) | Claude Haiku 4.5 | Structured summaries with tight prompts; ~8x cheaper than Sonnet with acceptable quality |
-| Script Writer | Claude Sonnet 4.5 | Voice consistency, SSML, 90-min narrative flow — quality matters here |
+| Curator | Claude Haiku 4.5 | Structured JSON, cheap |
+| Summarizer | Claude Haiku 4.5 | Structured prompts compensate for smaller model |
+| Script Writer | Claude Sonnet 4.5 | Voice consistency, SSML, narrative flow |
 
-**Estimated daily API cost: ~$0.15–0.18/day (~$5/month)**
-Previously ~$0.65/day with Sonnet for Summarizer + Script Writer.
-
-> **Why Haiku for Summarizer?** The summarization prompts are highly structured with explicit output formats (word counts, required sections). Haiku 4.5 handles these well when the prompt is tight. The quality difference vs Sonnet is minimal for P1/P2. For P0 deep dives, the structured prompt (CONTEXT / WHAT HAPPENED / WHY IT MATTERS / KEY TAKEAWAY / DISCUSSION POINT) guides Haiku effectively. Script Writer stays on Sonnet because it requires sustained narrative voice, natural transitions, and SSML — tasks where Haiku noticeably underperforms.
+**Estimated daily API cost: ~$0.17/day (~$5/month)**
 
 ---
 
@@ -51,7 +71,7 @@ These are **verified sender addresses** extracted from the user's Gmail inbox (r
 | `tldr_tech` | TLDR Tech | `dan@tldrnewsletter.com` | TLDR | Daily ~12:00 PM UTC | P1 | multipart/alternative |
 | `tldr_dev` | TLDR Dev | `dan@tldrnewsletter.com` | TLDR Dev | Daily ~12:15 PM UTC | P2 | multipart/alternative |
 | `techcrunch` | TechCrunch Daily | `newsletters@techcrunch.com` | TechCrunch Daily News | 2x/day (11 AM + 6 PM EST) | P0 | multipart/alternative |
-| `harper_carroll` | Harper Carroll AI | `hai@harpercarrollai.com` | Harper Carroll AI | Weekly (Wed/Thu) | P0 | multipart/alternative |
+| `harper_carroll` | Harper Carroll AI | `hai@harpercarrollai.com` | Harper Carroll AI | Weekly (Wed/Thu) | P0 | multipart/alternative → **use text/plain part** |
 | `ettech` | ETtech Top 5 | `newsletter@ettech.com` | ETtech Top 5 | Daily ~8:30 PM IST | P1 | multipart/mixed |
 | `et_ai` | ET AI | `newsletter@economictimesnews.com` | ET AI | Daily ~7:45 AM IST | P1 | multipart/mixed |
 
@@ -501,26 +521,67 @@ Article Title : Summary. Read More
 
 ### Parser: Harper Carroll (`parsers/harper_carroll_parser.py`)
 
-**Observed structure** (weekly digest):
+**MIME type**: `text/plain` — same as TLDR. Use the plain text part, not HTML.
+
+**Verified email structure** (from real emails, Feb 26 and Mar 4 2026):
+
 ```
+*****************
 What's New in AI?
-Feb 12-18, 2026
+*****************
 
+-----------
 Top Stories
-1. Title (link) — Description
-...
+-----------
 
-Major Model Releases / Health & Science / Business & Strategy /
-Safety & Security / Product & Developer Tools / Social Updates
-...
+1. Article Title (
+https://822c1333.click.kit-mail3.com/.../aHR0cHM6Ly93d3cu...
+) — One to two sentence description.
+
+2. Article Title (https://tracking.url) — Description inline.
+
+--------------------
+Major Model Releases
+--------------------
+
+Title (
+https://tracking.url
+) — Description.
+
+-----------------
+AI Agents & Tools       ← section names vary week to week
+-----------------
+
+------------------
+Business & Funding
+------------------
+
+-------------------------------
+What Happened with the Pentagon   ← editorial deep-dive sections
+-------------------------------
+
+Multi-paragraph analysis with inline links...
+
+Have a great week! If you find this useful...   ← STOP here
 ```
 
-**Key implementation notes**:
-- Most structured of all newsletters — sections map directly to podcast segments
-- Each story has a numbered title + link + multi-sentence description
-- "Social Updates" section: **skip** unless they contain original analysis
-- Stop parsing at "Live Course" or "Enroll" sections
-- WEEKLY — articles may be 2-7 days old; check against daily sources for freshness
+**Key structural facts**:
+1. **Top Stories are numbered** (`1.`, `2.`, ...); all other sections are unnumbered
+2. **URLs are Kit tracking redirects** — real URL is base64-encoded at the end of the path:
+   ```python
+   b64 = tracking_url.rstrip('/').split('/')[-1]
+   real_url = base64.b64decode(b64 + '==').decode('utf-8')
+   ```
+3. **Section names vary week to week** — parse all dash-bordered headers dynamically; do not hardcode section names
+4. **"What Happened with X" sections** are Harper Carroll's own editorial deep-dives — high podcast value; extract any inline links found within them
+5. **Stop marker**: `"Have a great week!"` — stop parsing at this line
+6. **Subject filter**: subjects contain `"this week"` or `"what's new in ai"` (already configured in senders.yaml)
+
+**Implementation notes**:
+- Section header = line of `---` + section name + line of `---` (three consecutive lines)
+- Article entry: `Title (URL_or_newline) — description` — URL may span multiple lines within parens
+- `extraction_confidence = 0.85` (structured plain text)
+- WEEKLY — articles may be 2–7 days old; dedup against daily sources handles freshness
 
 ### Parser: ETtech (`parsers/ettech_parser.py`)
 
@@ -975,40 +1036,51 @@ Each stage saves output to workspace. Re-run checks for existing checkpoint file
 
 ### Phase 1: MVP — Gmail to Summary (Week 1-2)
 
-```
-Build order:
-1. models/enums.py + models/article.py + models/podcast.py
-2. config/senders.yaml + config/preferences.yaml
-3. parsers/base_parser.py
-4. parsers/tldr_parser.py
-5. parsers/techcrunch_parser.py
-6. parsers/ettech_parser.py + parsers/et_ai_parser.py
-7. agents/ingestion.py
-8. agents/curator.py (URL dedup only + Haiku classification)
-9. agents/summarizer.py (tiered summaries with Haiku)
-10. Basic TTS test with gTTS (validates flow only)
-11. orchestrator/pipeline.py
-
-Test with: Save 5-10 real emails as HTML fixtures in tests/fixtures/
-```
-
-**Deliverable**: Working pipeline that produces a rough MP3 from real newsletters.
-
-### Phase 2: Quality Upgrade (Week 3-4)
+Active sources: **TLDR AI, TLDR Tech, TLDR Dev, TechCrunch, Harper Carroll**
 
 ```
 Build order:
-1. parsers/harper_carroll_parser.py
-2. scraper/article_scraper.py (trafilatura + newspaper3k)
-3. Integrate scraper into pipeline
+1.  models/enums.py + models/article.py + models/podcast.py
+2.  config/senders.yaml (enabled flags: harper_carroll=true, ettech/et_ai=false)
+3.  config/preferences.yaml (new priority rules + user profile)
+4.  parsers/base_parser.py
+5.  parsers/tldr_parser.py
+6.  parsers/techcrunch_parser.py
+7.  parsers/harper_carroll_parser.py  ← plain text, dash-bordered sections
+8.  parsers/generic_parser.py         ← BS4 fallback for NEWSLETTER_SENDERS env
+9.  agents/ingestion.py               ← config-driven GMAIL_QUERY + parser registry
+10. mcp_servers/article_fetcher_server.py  ← FastMCP fetch_article
+11. utils/llm_client.py               ← local_model_override param
+12. agents/curator.py                 ← new categories + CURATOR_LOCAL_MODEL
+13. agents/summarizer.py              ← dual-lens prompts + MCP fetch + SUMMARIZER_LOCAL_MODEL
+14. agents/script_writer.py           ← SCRIPT_LOCAL_MODEL
+15. Basic TTS test with gTTS (validates flow only)
+16. orchestrator/pipeline.py
+
+Test with: Save real emails as plain text fixtures in tests/fixtures/
+```
+
+**Deliverable**: Working pipeline producing a rough MP3 from TLDR + TechCrunch + Harper Carroll.
+
+### Phase 2: ET Sources + Quality Upgrade (Week 3-4)
+
+Active sources added: **ET Tech, ET AI** (via Inc42 fallback strategy)
+
+```
+Build order:
+1. parsers/ettech_parser.py + parsers/et_ai_parser.py
+2. ET paywall strategy: extract title from email → query Inc42.com directly
+   (do NOT follow ET links — paywall); MCP search_and_fetch for fallback
+3. mcp_servers/article_fetcher_server.py: add search_and_fetch tool
 4. agents/curator.py upgrade: semantic dedup with all-MiniLM-L6-v2
-5. agents/script_writer.py (Sonnet — conversational script + SSML)
+5. agents/script_writer.py (full SSML + segment transitions)
 6. agents/audio_producer.py (Chatterbox TTS via HuggingFace)
 7. Audio post-processing (pydub + ffmpeg normalization)
 8. config/tts_config.yaml + ElevenLabs fallback
+9. Enable ettech + et_ai in senders.yaml
 ```
 
-**Deliverable**: Polished, gym-ready podcast.
+**Deliverable**: Full 7-source pipeline with polished, gym-ready podcast.
 
 ### Phase 3: Automation & Delivery (Week 5-6)
 

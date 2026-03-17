@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Read(//c/Users/hp/.claude/**)",
+      "Read(//c/Users/hp/AppData/Roaming/Claude/**)",
+      "WebSearch",
+      "Bash(cmd /c \"powershell -Command \"\"Get-NetTCPConnection -LocalPort 11434 -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess\"\"\")",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/pytest tests/test_agents/test_script_writer_json.py -v)",
+      "Bash(.venv/Scripts/pytest tests/test_agents/test_semantic_dedup.py -v)"
+    ],
+    "additionalDirectories": [
+      "e:\\Projects\\newsflow\\workspace\\2026-03-12",
+      "e:\\Projects\\newsflow\\tests\\test_agents"
+    ]
+  }
+}

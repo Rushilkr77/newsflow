@@ -10,8 +10,11 @@ import base64
 import email
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 import structlog
 import yaml
@@ -62,13 +65,32 @@ def _load_senders_config() -> dict:
 def _build_gmail_query(senders_config: dict) -> str:
     """
     Build Gmail query from enabled senders in config + NEWSLETTER_SENDERS env var.
-    Only includes unique email addresses (multiple sources can share an address, e.g. TLDR variants).
+    Uses the maximum lookback_days across all enabled senders so weekly newsletters
+    (e.g. harper_carroll with lookback_days: 8) are included. Per-sender filtering
+    happens in Python after fetching.
+
+    Senders with include_weekdays are excluded from the query on days that don't
+    match — avoiding unnecessarily large lookback windows on non-qualifying days.
     """
+    today_weekday = datetime.now(_IST).weekday()  # Mon=0 … Fri=4, using IST timezone
     emails: set[str] = set()
+    max_lookback = 1
 
     for sender in senders_config.get("senders", []):
-        if sender.get("enabled", False):
-            emails.add(sender["sender_email"].lower())
+        if not sender.get("enabled", False):
+            continue
+        allowed_weekdays = sender.get("include_weekdays")
+        if allowed_weekdays and today_weekday not in allowed_weekdays:
+            # Skip this sender for today's query — weekday gate not met
+            log.info(
+                "sender_excluded_weekday_gate",
+                sender_id=sender.get("id"),
+                today_weekday=today_weekday,
+                allowed=allowed_weekdays,
+            )
+            continue
+        emails.add(sender["sender_email"].lower())
+        max_lookback = max(max_lookback, sender.get("lookback_days", 1))
 
     extra = os.getenv("NEWSLETTER_SENDERS", "")
     for addr in extra.split(","):
@@ -81,7 +103,21 @@ def _build_gmail_query(senders_config: dict) -> str:
         return "newer_than:1d label:inbox"
 
     email_list = " OR ".join(sorted(emails))
-    return f"from:({email_list}) newer_than:1d"
+    return f"from:({email_list}) newer_than:{max_lookback}d"
+
+
+def _build_sender_lookback_map(senders_config: dict) -> dict[str, int]:
+    """
+    Maps sender_email → max lookback_days across all enabled entries for that address.
+    Handles shared addresses (e.g. TLDR variants all from dan@tldrnewsletter.com).
+    """
+    result: dict[str, int] = {}
+    for sender in senders_config.get("senders", []):
+        if sender.get("enabled", False):
+            addr = sender["sender_email"].lower()
+            days = sender.get("lookback_days", 1)
+            result[addr] = max(result.get(addr, 0), days)
+    return result
 
 
 def _build_source_routing(senders_config: dict) -> dict:
@@ -106,6 +142,24 @@ class IngestionAgent:
         self._gmail_query = _build_gmail_query(self._senders_config)
         self._source_routing = _build_source_routing(self._senders_config)
         self._excluded_variants = self._senders_config.get("excluded_variants", [])
+        self._sender_lookback = _build_sender_lookback_map(self._senders_config)
+
+        # Senders that should keep only the most recent email within their window
+        # (weekly newsletters where we always want the latest issue, not all issues in the window)
+        self._keep_latest_only: set[str] = {
+            s["sender_email"].lower()
+            for s in self._senders_config.get("senders", [])
+            if s.get("enabled", False) and s.get("lookback_days", 1) > 1
+        }
+
+        # Weekday gates: sender_email → set of allowed weekdays (Mon=0…Fri=4, IST).
+        # Emails from these senders are dropped on non-qualifying days even if they
+        # passed the broad Gmail query.
+        self._sender_weekday_gates: dict[str, set[int]] = {}
+        for s in self._senders_config.get("senders", []):
+            if s.get("enabled", False) and "include_weekdays" in s:
+                addr = s["sender_email"].lower()
+                self._sender_weekday_gates.setdefault(addr, set()).update(s["include_weekdays"])
 
         # Custom senders from env that are NOT in the YAML config → generic parser
         yaml_emails = {s["sender_email"].lower() for s in self._senders_config.get("senders", [])}
@@ -120,12 +174,19 @@ class IngestionAgent:
             "ingestion_configured",
             gmail_query=self._gmail_query,
             custom_senders=sorted(self._custom_senders),
+            weekly_senders=sorted(self._keep_latest_only),
         )
 
     def run(self) -> list[RawArticle]:
         self._service = self._get_gmail_service()
         messages = self._fetch_messages()
         log.info("gmail_fetch_complete", message_count=len(messages))
+
+        # Apply per-sender lookback filter — query used max(lookback_days) globally,
+        # so we trim here to each sender's actual window and keep only the latest
+        # email for weekly senders (e.g. harper_carroll).
+        messages = self._filter_messages_by_lookback(messages)
+        log.info("after_lookback_filter", message_count=len(messages))
 
         all_articles: list[RawArticle] = []
         processed_ids: list[str] = []
@@ -158,6 +219,90 @@ class IngestionAgent:
             self._label_messages(processed_ids)
 
         return deduped
+
+    def _get_message_metadata(self, msg_id: str) -> tuple[str, datetime]:
+        """Fetch only From + Date headers (lightweight metadata call — no body download)."""
+        msg = self._service.users().messages().get(
+            userId="me",
+            id=msg_id,
+            format="metadata",
+            metadataHeaders=["From", "Date"],
+        ).execute()
+        headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
+        from_raw = headers.get("From", "")
+        date_str = headers.get("Date", "")
+        sender_email, _ = self._parse_from_header(from_raw)
+        timestamp = self._parse_date(date_str)
+        return sender_email, timestamp
+
+    def _filter_messages_by_lookback(self, msg_ids: list[str]) -> list[str]:
+        """
+        Apply per-sender lookback filtering after the broad Gmail query.
+        - Senders with lookback_days=1: discard emails older than 1 day.
+        - Senders with lookback_days>1 (weekly newsletters): keep only the most
+          recent email within their window.
+        Falls back to including the message if metadata fetch fails.
+        """
+        now = datetime.utcnow()
+
+        # Collect metadata for each message
+        msg_info: list[tuple[str, str, datetime]] = []
+        for msg_id in msg_ids:
+            try:
+                sender_email, timestamp = self._get_message_metadata(msg_id)
+                msg_info.append((msg_id, sender_email, timestamp))
+            except Exception as e:
+                log.warning("metadata_fetch_failed", msg_id=msg_id, error=str(e))
+                msg_info.append((msg_id, "", now))  # include conservatively
+
+        today_weekday = datetime.now(_IST).weekday()  # IST weekday for gate checks
+
+        filtered: list[str] = []
+        # For weekly senders: track the single most-recent email within the window
+        latest_per_sender: dict[str, tuple[str, datetime]] = {}
+
+        for msg_id, sender_email, timestamp in msg_info:
+            # Weekday gate: skip senders not allowed on today's day-of-week (IST)
+            if sender_email in self._sender_weekday_gates:
+                allowed = self._sender_weekday_gates[sender_email]
+                if today_weekday not in allowed:
+                    log.info(
+                        "sender_skipped_weekday",
+                        sender=sender_email,
+                        today_weekday=today_weekday,
+                        allowed_weekdays=sorted(allowed),
+                    )
+                    continue
+
+            lookback_days = self._sender_lookback.get(sender_email, 1)
+            cutoff = now - timedelta(days=lookback_days)
+
+            if timestamp < cutoff:
+                log.debug(
+                    "email_too_old",
+                    sender=sender_email,
+                    age_days=(now - timestamp).days,
+                    lookback_days=lookback_days,
+                )
+                continue
+
+            if sender_email in self._keep_latest_only:
+                prev = latest_per_sender.get(sender_email)
+                if prev is None or timestamp > prev[1]:
+                    latest_per_sender[sender_email] = (msg_id, timestamp)
+            else:
+                filtered.append(msg_id)
+
+        # Add the single most-recent email for each weekly sender
+        for sender_email, (msg_id, ts) in latest_per_sender.items():
+            log.info(
+                "weekly_newsletter_selected",
+                sender=sender_email,
+                email_date=ts.strftime("%Y-%m-%d"),
+            )
+            filtered.append(msg_id)
+
+        return filtered
 
     def _get_gmail_service(self):
         creds_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "credentials.json")
@@ -270,10 +415,18 @@ class IngestionAgent:
 
         sender_entries = self._source_routing.get(sender_email, [])
         if not sender_entries:
+            log.debug("no_routing_entry", sender=sender_email)
             return None, None
 
         for entry in sender_entries:
-            detection = entry.get("variant_detection", "none")
+            # Normalize: YAML `none` can parse as Python None in some PyYAML builds
+            detection = (entry.get("variant_detection") or "none")
+            log.debug(
+                "routing_check",
+                sender=sender_email,
+                entry_id=entry.get("id"),
+                detection=detection,
+            )
 
             if detection == "none":
                 parser = _PARSER_INSTANCES.get(entry.get("parser", "generic"), _GENERIC_PARSER)
@@ -316,6 +469,7 @@ class IngestionAgent:
         - TLDR: text/plain (well-structured plain text)
         - All others: text/html
         """
+        # TLDR uses text/plain (well-structured). HC uses HTML (title = link text).
         want_plain = source_id.startswith("tldr_")
         mime_pref = "text/plain" if want_plain else "text/html"
         fallback_mime = "text/html" if want_plain else "text/plain"
