@@ -1,20 +1,21 @@
 """
 MCP Server: Article Content Fetcher
 
-Exposes article fetching as an MCP tool (fetch_article).
-Can be run standalone as an MCP server (e.g. for Claude Desktop integration)
-OR imported directly — the core fetch function is usable from Python without
-going through the MCP protocol.
+Exposes two MCP tools:
+  - fetch_article(url): trafilatura + newspaper3k + rate limiting
+  - search_and_fetch(title): Inc42 search fallback for ET paywall bypass
 
-Phase 1: fetch_article(url) — trafilatura + newspaper3k + rate limiting
-Phase 2 (future): search_and_fetch(query, preferred_sites) — for ET paywall bypass via Inc42/Google
+Can be run standalone as an MCP server (e.g. for Claude Desktop integration)
+OR imported directly — the core fetch functions are usable from Python without
+going through the MCP protocol.
 
 Usage as MCP server:
     python -m mcp_servers.article_fetcher_server
 
 Usage from Python:
-    from mcp_servers.article_fetcher_server import fetch_article_content
+    from mcp_servers.article_fetcher_server import fetch_article_content, search_and_fetch_content
     text = fetch_article_content("https://example.com/article")
+    text = search_and_fetch_content("OpenAI raises $40B funding round")
 """
 import sys
 from pathlib import Path
@@ -25,11 +26,13 @@ import structlog
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scraper.article_scraper import ArticleScraper
+from scraper.inc42_scraper import Inc42Scraper
 
 log = structlog.get_logger(__name__)
 
-# Shared scraper instance — handles trafilatura + newspaper3k + rate limiting
+# Shared scraper instances
 _scraper = ArticleScraper()
+_inc42 = Inc42Scraper()
 
 
 def fetch_article_content(url: str) -> str:
@@ -47,6 +50,25 @@ def fetch_article_content(url: str) -> str:
         log.debug("article_fetched", url=url, chars=len(result))
         return result
     log.debug("article_fetch_empty", url=url)
+    return ""
+
+
+def search_and_fetch_content(title: str) -> str:
+    """
+    Search Inc42.com for an article matching *title* and return its full text.
+
+    Used as an ET paywall bypass: ET Tech and ET AI articles link to
+    economictimes.indiatimes.com which is paywalled. This searches Inc42
+    (India's leading startup news site) for the same story and returns
+    the full text from there instead.
+
+    Returns extracted text on success, empty string if not found.
+    """
+    result = _inc42.search_and_fetch(title)
+    if result:
+        log.debug("inc42_fetched", title=title[:60], chars=len(result))
+        return result
+    log.debug("inc42_fetch_empty", title=title[:60])
     return ""
 
 
@@ -71,15 +93,29 @@ try:
         """
         return fetch_article_content(url)
 
+    @mcp.tool()
+    def search_and_fetch(title: str) -> str:
+        """
+        Search Inc42.com for an article matching the given title and return its full text.
+
+        Use this as a fallback for ET Tech and ET AI articles, which link to
+        economictimes.indiatimes.com (paywalled). Inc42 covers the same India tech
+        stories without a paywall.
+
+        Returns extracted article text, or an empty string if no matching article is found.
+        """
+        return search_and_fetch_content(title)
+
     if __name__ == "__main__":
         mcp.run()
 
 except ImportError:
     # mcp package not installed — MCP server mode unavailable.
-    # fetch_article_content() still works for direct Python use.
+    # fetch_article_content() and search_and_fetch_content() still work for direct Python use.
     if __name__ == "__main__":
         print(
             "ERROR: 'mcp' package not installed. "
             "Run: pip install mcp  to enable MCP server mode.\n"
-            "The fetch_article_content() function still works when imported directly."
+            "The fetch_article_content() and search_and_fetch_content() functions "
+            "still work when imported directly."
         )

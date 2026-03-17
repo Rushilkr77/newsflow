@@ -23,10 +23,14 @@ newspaper3k>=0.2
 # Embeddings (semantic dedup)
 sentence-transformers>=2.7
 
-# TTS (Phase 1)
-gTTS>=2.5
+# TTS (Phase 2 — Chatterbox primary + ElevenLabs fallback + gTTS last resort)
+chatterbox-tts>=0.1.0      # ResembleAI/Chatterbox — free local TTS
+elevenlabs>=1.0            # ElevenLabs API fallback (requires ELEVENLABS_API_KEY)
+gTTS>=2.5                  # Last-resort fallback
 pydub>=0.25
 pyloudnorm>=0.1.1
+scipy>=1.11                # wav array conversion for Chatterbox output
+numpy>=1.24                # audio sample manipulation
 
 # Logging
 structlog>=24.0
