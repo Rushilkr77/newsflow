@@ -54,7 +54,15 @@ _OUTPUT_BITRATE: str = str(_OUTPUT_CFG.get("bitrate", "128k"))
 
 # Max chars per TTS call per provider (from tts_config.yaml)
 _CHATTERBOX_MAX_CHARS: int = _PRIMARY_CFG.get("params", {}).get("max_chars_per_call", 300)
-_ELEVENLABS_MAX_CHARS: int = _FALLBACK_CFG.get("params", {}).get("max_chars_per_call", 5000)
+
+# Per-segment provider routing: segment_type → "chatterbox" | "f5_tts"
+# Loaded from tts_config.yaml segment_routing block.
+# Hardcoded defaults kick in for any segment not listed in config.
+_DEFAULT_LONG_SEGMENTS: frozenset = frozenset({"ai_updates", "funding", "india_tech", "product_strategy"})
+_SEGMENT_ROUTING: dict[str, str] = {}
+for _provider_key, _segments in _TTS_CFG.get("segment_routing", {}).items():
+    for _seg in (_segments or []):
+        _SEGMENT_ROUTING[_seg] = _provider_key  # "chatterbox" or "f5_tts"
 
 
 # Ensure pydub can find ffmpeg on Windows after a winget install (PATH not refreshed yet)
@@ -249,7 +257,7 @@ class AudioProducerAgent:
                 chars=len(segment.content_plain),
             )
             try:
-                seg_audio = self._segment_to_audio(segment.content_plain)
+                seg_audio = self._segment_to_audio(segment.content_plain, segment.segment_type)
                 if i > 0:
                     audio_segments.append(segment_silence)
                 audio_segments.append(seg_audio)
@@ -315,20 +323,40 @@ class AudioProducerAgent:
         )
 
     # -------------------------------------------------------------------------
-    # TTS dispatch: Chatterbox → F5-TTS → gTTS
+    # TTS dispatch: segment-aware routing with fallback
     # -------------------------------------------------------------------------
 
-    def _segment_to_audio(self, text: str) -> AudioSegment:
-        """Convert a segment's plain text to AudioSegment via provider fallback chain."""
-        try:
-            return self._synthesize_chatterbox(text)
-        except Exception as e:
-            log.warning("chatterbox_failed", error=str(e), fallback="f5tts")
+    def _segment_to_audio(self, text: str, segment_type: str = "") -> AudioSegment:
+        """
+        Route each segment to its designated TTS provider, then fall back if needed.
+
+        Routing (from tts_config.yaml segment_routing, with hardcoded defaults):
+          Chatterbox — cold_open, intro, quick_hits, closing  (punchy/expressive)
+          F5-TTS     — ai_updates, funding, india_tech, product_strategy  (long-form prosody)
+
+        Fallback chain: designated provider → other provider → gTTS
+        """
+        designated = _SEGMENT_ROUTING.get(
+            segment_type,
+            "f5_tts" if segment_type in _DEFAULT_LONG_SEGMENTS else "chatterbox",
+        )
+        log.info("tts_provider_selected", segment_type=segment_type, provider=designated)
+
+        if designated == "chatterbox":
+            primary_fn, fallback_fn = self._synthesize_chatterbox, self._synthesize_f5tts
+        else:
+            primary_fn, fallback_fn = self._synthesize_f5tts, self._synthesize_chatterbox
 
         try:
-            return self._synthesize_f5tts(text)
+            return primary_fn(text)
         except Exception as e:
-            log.warning("f5tts_failed", error=str(e), fallback="gtts")
+            log.warning("primary_tts_failed", segment_type=segment_type,
+                        provider=designated, error=str(e))
+
+        try:
+            return fallback_fn(text)
+        except Exception as e:
+            log.warning("fallback_tts_failed", segment_type=segment_type, error=str(e))
 
         return self._synthesize_gtts(text)
 
