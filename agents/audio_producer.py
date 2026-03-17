@@ -1,7 +1,7 @@
 """
-Agent 5: Audio Producer (Phase 2 — Chatterbox TTS + ElevenLabs fallback)
-Converts podcast script to MP3 using Chatterbox TTS (free, HuggingFace).
-Falls back to ElevenLabs if Chatterbox is unavailable, then gTTS as last resort.
+Agent 5: Audio Producer (Phase 2 — Chatterbox TTS + F5-TTS fallback)
+Converts podcast script to MP3 using Chatterbox TTS (free, local HuggingFace inference).
+Falls back to F5-TTS (free, local) if Chatterbox is unavailable, then gTTS as last resort.
 
 Flow:
   1. Load podcast_script.json
@@ -128,50 +128,88 @@ class ChatterboxProvider:
         return AudioSegment.from_wav(buf)
 
 
-class ElevenLabsProvider:
+class F5TTSProvider:
     """
-    Fallback TTS using ElevenLabs API (paid, higher quality).
-    Max 5000 chars per call — less chunking overhead.
-    Requires ELEVENLABS_API_KEY environment variable.
+    Fallback TTS using F5-TTS (SWivid/F5-TTS — free, local inference).
+
+    Why F5-TTS over ElevenLabs for podcast flow:
+    - Handles 800-char chunks natively → cross-sentence prosody is preserved
+    - speed=1.05 targets ~150 WPM — natural gym-listening pace
+    - seed=-1 adds subtle variation between chunks (avoids robotic repetition)
+    - Fully local: no API key, no rate limits, works offline
+
+    Voice cloning: set voice_reference + voice_reference_text in tts_config.yaml
+    to lock in a consistent host voice across every episode.
     """
 
     def __init__(self, config: dict):
-        self.voice_id: str = config.get("voice_id", "josh")
-        self.model_id: str = config.get("model", "eleven_turbo_v2_5")
         params = config.get("params", {})
-        self.stability: float = params.get("stability", 0.5)
-        self.similarity_boost: float = params.get("similarity_boost", 0.75)
-        self._client = None
+        self.model_type: str = config.get("model", "F5-TTS")
+        self.speed: float = params.get("speed", 1.05)
+        self.seed: int = params.get("seed", -1)
+        self.voice_reference: str | None = config.get("voice_reference") or None
+        self.voice_reference_text: str | None = config.get("voice_reference_text") or None
+        self._model = None
 
-    def _get_client(self):
-        if self._client is None:
-            from elevenlabs import ElevenLabs  # type: ignore[import]
-            api_key = os.environ.get("ELEVENLABS_API_KEY", "")
-            if not api_key:
-                raise RuntimeError("ELEVENLABS_API_KEY not set in environment")
-            self._client = ElevenLabs(api_key=api_key)
-            log.info("elevenlabs_client_ready")
-        return self._client
+    def _get_model(self):
+        if self._model is None:
+            from f5_tts.api import F5TTS  # type: ignore[import]
+            log.info("f5tts_model_loading", model_type=self.model_type)
+            self._model = F5TTS(model_type=self.model_type)
+            log.info("f5tts_model_ready")
+        return self._model
+
+    def _resolve_reference(self) -> tuple[str, str]:
+        """
+        Return (ref_audio_path, ref_text).
+        Falls back to the package's bundled English reference if none configured.
+        """
+        if self.voice_reference and self.voice_reference_text:
+            return self.voice_reference, self.voice_reference_text
+
+        # Use F5-TTS bundled default reference (ships with the package)
+        try:
+            import importlib.resources as pkg_resources
+            ref_dir = Path(str(pkg_resources.files("f5_tts"))) / "infer" / "examples" / "basic"
+            ref_wav = str(ref_dir / "basic_ref_en.wav")
+            ref_txt_path = ref_dir / "basic_ref_en.txt"
+            ref_txt = ref_txt_path.read_text().strip() if ref_txt_path.exists() else (
+                "Some call me nature, others call me mother nature."
+            )
+            if Path(ref_wav).exists():
+                return ref_wav, ref_txt
+        except Exception:
+            pass
+
+        raise RuntimeError(
+            "F5-TTS requires a voice reference. Either set voice_reference + "
+            "voice_reference_text in config/tts_config.yaml, or ensure the f5-tts "
+            "package is installed with its bundled reference audio."
+        )
 
     def synthesize(self, text: str) -> AudioSegment:
-        from elevenlabs import VoiceSettings  # type: ignore[import]
+        import numpy as np
+        from scipy.io import wavfile  # type: ignore[import]
 
-        client = self._get_client()
-        audio_iter = client.generate(
-            text=text,
-            voice=self.voice_id,
-            model=self.model_id,
-            voice_settings=VoiceSettings(
-                stability=self.stability,
-                similarity_boost=self.similarity_boost,
-            ),
+        model = self._get_model()
+        ref_audio, ref_text = self._resolve_reference()
+
+        wav, sr, _ = model.infer(
+            ref_file=ref_audio,
+            ref_text=ref_text,
+            gen_text=text,
+            speed=self.speed,
+            seed=self.seed,
         )
+
+        # wav is a numpy float32 array
+        wav_np: "np.ndarray" = np.array(wav).squeeze()
+        wav_int16 = (wav_np * 32767).clip(-32768, 32767).astype(np.int16)
+
         buf = io.BytesIO()
-        for chunk in audio_iter:
-            if chunk:
-                buf.write(chunk)
+        wavfile.write(buf, sr, wav_int16)
         buf.seek(0)
-        return AudioSegment.from_mp3(buf)
+        return AudioSegment.from_wav(buf)
 
 
 class GTTSProvider:
@@ -194,7 +232,7 @@ class GTTSProvider:
 class AudioProducerAgent:
     def __init__(self):
         self._chatterbox: ChatterboxProvider | None = None
-        self._elevenlabs: ElevenLabsProvider | None = None
+        self._f5tts: F5TTSProvider | None = None
         self._gtts: GTTSProvider | None = None
         self._active_provider: str = "unknown"
 
@@ -277,7 +315,7 @@ class AudioProducerAgent:
         )
 
     # -------------------------------------------------------------------------
-    # TTS dispatch: Chatterbox → ElevenLabs → gTTS
+    # TTS dispatch: Chatterbox → F5-TTS → gTTS
     # -------------------------------------------------------------------------
 
     def _segment_to_audio(self, text: str) -> AudioSegment:
@@ -285,12 +323,12 @@ class AudioProducerAgent:
         try:
             return self._synthesize_chatterbox(text)
         except Exception as e:
-            log.warning("chatterbox_failed", error=str(e), fallback="elevenlabs")
+            log.warning("chatterbox_failed", error=str(e), fallback="f5tts")
 
         try:
-            return self._synthesize_elevenlabs(text)
+            return self._synthesize_f5tts(text)
         except Exception as e:
-            log.warning("elevenlabs_failed", error=str(e), fallback="gtts")
+            log.warning("f5tts_failed", error=str(e), fallback="gtts")
 
         return self._synthesize_gtts(text)
 
@@ -316,18 +354,25 @@ class AudioProducerAgent:
         self._active_provider = "chatterbox"
         return sum(parts[1:], parts[0])
 
-    def _synthesize_elevenlabs(self, text: str) -> AudioSegment:
-        if self._elevenlabs is None:
-            self._elevenlabs = ElevenLabsProvider(_FALLBACK_CFG)
+    def _synthesize_f5tts(self, text: str) -> AudioSegment:
+        """
+        F5-TTS fallback — 800-char chunks preserve cross-sentence prosody.
+        At speed=1.05 this targets ~150 WPM, natural for gym listening.
+        Larger chunks than Chatterbox mean fewer inference calls and smoother
+        intonation across sentence boundaries within a paragraph.
+        """
+        if self._f5tts is None:
+            self._f5tts = F5TTSProvider(_FALLBACK_CFG)
 
-        chunks = _chunk_text(text, max_chars=_ELEVENLABS_MAX_CHARS)
+        f5_max_chars: int = _FALLBACK_CFG.get("params", {}).get("max_chars_per_call", 800)
+        chunks = _chunk_text(text, max_chars=f5_max_chars)
         parts: list[AudioSegment] = []
         article_silence = AudioSegment.silent(duration=_SILENCE_BETWEEN_ARTICLES_MS)
 
         for chunk in chunks:
             if not chunk.strip():
                 continue
-            audio = self._elevenlabs.synthesize(chunk)
+            audio = self._f5tts.synthesize(chunk)
             if parts:
                 parts.append(article_silence)
             parts.append(audio)
@@ -335,7 +380,7 @@ class AudioProducerAgent:
         if not parts:
             return AudioSegment.silent(duration=500)
 
-        self._active_provider = "elevenlabs"
+        self._active_provider = "f5tts"
         return sum(parts[1:], parts[0])
 
     def _synthesize_gtts(self, text: str) -> AudioSegment:

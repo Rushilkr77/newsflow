@@ -9,13 +9,14 @@ primary:
   voice_reference: null
 
 fallback:
-  provider: elevenlabs
-  model: eleven_turbo_v2_5
-  voice_id: "josh"
+  provider: f5_tts
+  model: F5-TTS                # or E2-TTS for faster/lighter inference
   params:
-    stability: 0.5
-    similarity_boost: 0.75
-    max_chars_per_call: 5000
+    speed: 1.05                # slightly above 1.0 = natural podcast pace (~150 WPM)
+    seed: -1                   # -1 = random seed per chunk (more natural variation)
+    max_chars_per_call: 800    # ~130 words ~52 sec/chunk — preserves cross-sentence prosody
+  voice_reference: null        # path to a .wav reference clip for voice cloning (optional)
+  voice_reference_text: null   # transcript of the reference clip (required if voice_reference set)
 
 output:
   format: mp3
