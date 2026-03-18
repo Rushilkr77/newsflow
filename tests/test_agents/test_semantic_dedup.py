@@ -11,6 +11,8 @@ Similarity layout (after L2 normalisation, via dot product):
 
 Run: pytest tests/test_agents/test_semantic_dedup.py -v
 """
+import sys
+import types
 import uuid
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -21,6 +23,17 @@ import pytest
 from agents.curator import CuratorAgent
 from models.article import RawArticle
 from models.enums import Source
+
+
+def _patch_sentence_transformers():
+    """
+    Return a context manager that stubs out sentence_transformers so the
+    `try: import sentence_transformers` guard in _semantic_dedup passes,
+    allowing the mock _embed_model to be used.
+    """
+    fake_st = types.ModuleType("sentence_transformers")
+    fake_st.SentenceTransformer = MagicMock()
+    return patch.dict(sys.modules, {"sentence_transformers": fake_st})
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +142,9 @@ class TestSemanticDedup:
 
         mock_model = MagicMock()
         mock_model.encode.return_value = fixed_embs
+        curator._embed_model = mock_model
 
-        with patch("agents.curator.CuratorAgent._embed_model", mock_model, create=True):
-            curator._embed_model = mock_model
+        with _patch_sentence_transformers():
             result = curator._semantic_dedup(articles)
 
         return result
