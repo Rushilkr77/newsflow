@@ -100,6 +100,8 @@ class ChatterboxProvider:
         self._sample_rate: int = 24000  # Chatterbox default output sample rate
 
     def _get_model(self):
+        if getattr(self, "_permanently_failed", False):
+            raise RuntimeError("Chatterbox disabled after prior load failure")
         if self._model is None:
             from chatterbox.tts import ChatterboxTTS  # type: ignore[import]
             try:
@@ -108,7 +110,11 @@ class ChatterboxProvider:
             except ImportError:
                 device = "cpu"
             log.info("chatterbox_model_loading", device=device)
-            self._model = ChatterboxTTS.from_pretrained(device=device)
+            try:
+                self._model = ChatterboxTTS.from_pretrained(device=device)
+            except Exception:
+                self._permanently_failed = True
+                raise
             log.info("chatterbox_model_ready")
         return self._model
 
@@ -160,10 +166,16 @@ class F5TTSProvider:
         self._model = None
 
     def _get_model(self):
+        if getattr(self, "_permanently_failed", False):
+            raise RuntimeError("F5-TTS disabled after prior load failure")
         if self._model is None:
             from f5_tts.api import F5TTS  # type: ignore[import]
             log.info("f5tts_model_loading", model_type=self.model_type)
-            self._model = F5TTS(model_type=self.model_type)
+            try:
+                self._model = F5TTS(model=self.model_type)
+            except Exception:
+                self._permanently_failed = True
+                raise
             log.info("f5tts_model_ready")
         return self._model
 

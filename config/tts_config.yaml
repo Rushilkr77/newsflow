@@ -10,7 +10,7 @@ primary:
 
 fallback:
   provider: f5_tts
-  model: F5-TTS                # or E2-TTS for faster/lighter inference
+  model: F5TTS_v1_Base         # or E2TTS for faster/lighter inference
   params:
     speed: 1.05                # slightly above 1.0 = natural podcast pace (~150 WPM)
     seed: -1                   # -1 = random seed per chunk (more natural variation)
