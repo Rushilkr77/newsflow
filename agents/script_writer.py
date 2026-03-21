@@ -81,7 +81,7 @@ _CATEGORY_TO_SEGMENT = {
     Category.BIG_TECH_LAUNCHES:   "ai_updates",
     Category.AI_PRODUCTS_TOOLS:   "ai_updates",
     Category.PRODUCT_INNOVATIONS: "ai_updates",    # new innovations slot into tech updates
-    Category.INDIA_STARTUPS:      "india_tech",
+    Category.INDIA_TECH:          "india_tech",
     Category.FUNDING_MA:          "funding",
     Category.INDUSTRY_STRATEGY:   "product_strategy",
     Category.ENGINEERING_TECH:    "quick_hits",
@@ -115,13 +115,16 @@ class ScriptWriterAgent:
         summaries: list[ArticleSummary],
         date: str,
         expansion_mode: bool = False,
+        coverage_gaps: list[str] | None = None,
     ) -> PodcastScript:
         self._expansion_mode = expansion_mode
+        self._coverage_gaps = coverage_gaps or []
         log.info(
             "script_writer_start",
             summary_count=len(summaries),
             date=date,
             expansion_mode=expansion_mode,
+            gap_count=len(self._coverage_gaps),
         )
 
         grouped = self._group_by_segment(summaries)
@@ -275,34 +278,68 @@ class ScriptWriterAgent:
             source_article_ids=all_source_ids,
         )
 
-    def _get_expansion_note(self, seg_id: str) -> str:
+    def _get_expansion_note(self, seg_id: str, summaries: list[ArticleSummary] | None = None) -> str:
         """Segment-specific expansion instructions for the multi-call plain-text path."""
+        # Build the targeted gap list if we have specific gap article IDs
+        gap_titles: list[str] = []
+        if self._coverage_gaps and summaries:
+            gap_set = set(self._coverage_gaps)
+            gap_titles = [s.title for s in summaries if s.article_id in gap_set]
+
+        if gap_titles:
+            gap_list = "\n".join(f"  - {t}" for t in gap_titles)
+            prefix = (
+                "EXPANSION MODE — the following articles were not adequately covered in "
+                "the first pass and MUST be narrated now:\n"
+                f"{gap_list}\n\n"
+                "For EACH article listed above, ensure the narration covers:\n"
+                "  1. Core news (what happened)\n"
+                "  2. Surrounding impact (who it affects, ecosystem shift)\n"
+                "  3. Competitor context (if present in the summary)\n"
+                "  4. Why it was built/launched\n"
+                "  5. How it works technically\n"
+                "  6. PM interview edge\n\n"
+                "Do NOT re-cover articles that are already well-narrated. "
+                "Do NOT pad. Focus only on the gaps listed above.\n"
+            )
+        else:
+            prefix = (
+                "EXPANSION MODE — your only goal is to ensure EVERY article in the list below "
+                "has been covered at appropriate depth. Check for articles that were skipped or "
+                "only mentioned in passing in the first pass and give them proper coverage. "
+                "Do NOT make already-covered articles longer. Do NOT pad. "
+                "If all articles are already well-covered, the right answer is a shorter episode — "
+                "accept it and do not inflate content.\n"
+            )
         notes = {
             "ai_updates": (
-                "EXPANSION MODE: Treat P1 articles with full P0 depth — include technical angle, "
-                "market implications, and a 2-3 sentence PM interview insight for EVERY article. "
-                "Do NOT just state what happened; explain WHY it matters architecturally."
+                prefix +
+                "For each article: what happened → technical angle → why it matters for a PM. "
+                "Treat P1 articles with the same structure as P0, but keep each story to 2-3 sentences "
+                "per section. Move on as soon as the key insight is clear."
             ),
             "funding": (
-                "EXPANSION MODE: For each funding story explain what the round means for the ecosystem, "
-                "who the lead backers are, what the valuation implies for competitors, "
-                "and what a PM should know about the business model shift."
+                prefix +
+                "For each funding story: round size + lead backer → what the valuation implies → "
+                "one PM insight about the business model or competitive shift. Then move on."
             ),
             "india_tech": (
-                "EXPANSION MODE: Go deeper on each story — include founder background, market context, "
-                "what problem the startup is solving technically, and a PM interview angle."
+                prefix +
+                "For each India story: what the company does → what happened → founder/market context → "
+                "one PM angle. Concise — Indian ecosystem stories are often self-contained."
             ),
             "product_strategy": (
-                "EXPANSION MODE: For each story explain the business model angle, "
-                "who wins and loses, strategic implications for competing products, "
-                "and a PM's decision framework."
+                prefix +
+                "For each story: the strategic move → who wins/loses → one PM decision framework angle. "
+                "Keep it tight — strategy stories land better as punchy insights than long explanations."
             ),
             "quick_hits": (
-                "EXPANSION MODE: Give each story 2-3 sentences with a technical insight — "
-                "not just what happened, but why it matters for engineers building AI products."
+                prefix +
+                "2-3 sentences per story max: what happened + why it matters for engineers building AI. "
+                "No padding — if a story only warrants one sentence, keep it one sentence."
             ),
         }
-        return notes.get(seg_id, "EXPANSION MODE: Elaborate on each story with depth and insight.")
+        return notes.get(seg_id, prefix + "Cover each story clearly then move to the next.")
 
     def _generate_segment_part(
         self,
@@ -339,13 +376,14 @@ class ScriptWriterAgent:
             else "Continue the segment — no new signpost intro, just keep going from the previous article."
         )
 
-        expansion_note = f"\n{self._get_expansion_note(seg_id)}\n" if expansion_mode else ""
+        expansion_note = f"\n{self._get_expansion_note(seg_id, summaries)}\n" if expansion_mode else ""
 
         user_prompt = f"""Write podcast narration for the following articles. Return PLAIN TEXT only — no JSON, no markdown.
 
 Segment: {seg_id}
 {opener_note}
 {expansion_note}
+DEPTH RULE: Cover each article to the right level of depth — what happened, why it matters technically, and the PM angle. Once that is clear, STOP and move to the next article. Do not pad, repeat, or add filler sentences to reach a word count target. A well-covered 2-minute story should be 2 minutes, not 4.
 CRITICAL: Only use facts that appear in the summaries below. Do not invent product names, statistics, or facts.
 For each article end with a 2-3 sentence interview insight starting with "If someone asks you about this in an interview, here's your edge:"
 {_INTERVIEW_EDGE_INSTRUCTION}
@@ -441,6 +479,9 @@ Articles:
                 data = json.loads(raw)
 
                 content_plain = data.get("content_plain", "")
+                # If the model wrapped plain text in a JSON object inside content_plain
+                # (e.g. {"podcast_narration": "..."}), unwrap it.
+                content_plain = self._unwrap_json_plain(content_plain)
                 # Strip any HTML/XML tags the model inserted (e.g. <br><br>) — only SSML
                 # tags belong in content_ssml, content_plain must be tag-free.
                 content_plain = re.sub(r"<[^>]+>", "", content_plain)

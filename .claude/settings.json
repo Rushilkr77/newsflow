@@ -10,11 +10,20 @@
       "Bash(cmd /c \"powershell -Command \"\"Get-NetTCPConnection -LocalPort 11434 -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess\"\"\")",
       "Bash(.venv/Scripts/pip install:*)",
       "Bash(.venv/Scripts/pytest tests/test_agents/test_script_writer_json.py -v)",
-      "Bash(.venv/Scripts/pytest tests/test_agents/test_semantic_dedup.py -v)"
+      "Bash(.venv/Scripts/pytest tests/test_agents/test_semantic_dedup.py -v)",
+      "Bash(python -c:*)",
+      "Bash(cmd /c \"set PATH=C:\\\\Users\\\\hp\\\\.local\\\\bin;%PATH% && claude -p \"\"say hi\"\" --output-format text\")",
+      "Read(//e/Projects/newsflow/**)",
+      "Bash(cmd /c \"set PATH=C:\\\\Users\\\\hp\\\\.local\\\\bin;%PATH% && claude -p \"\"say hi\"\" --output-format text 2>&1\")",
+      "Bash(cmd /c \"set PATH=C:\\\\Users\\\\hp\\\\.local\\\\bin;%PATH% && claude -p \"\"hi\"\" --output-format json > C:\\\\Users\\\\hp\\\\AppData\\\\Local\\\\Temp\\\\claude_test.txt 2>&1\")",
+      "Read(//c/Users/hp/AppData/Local/Temp/**)",
+      "Bash(cmd /c \"set PATH=C:\\\\Users\\\\hp\\\\.local\\\\bin;%PATH% && claude --version\")",
+      "Bash(timeout 15 \"C:/Users/hp/AppData/Local/AnthropicClaude/app-1.1.7053/claude.exe\" -p \"say hi\")"
     ],
     "additionalDirectories": [
       "e:\\Projects\\newsflow\\workspace\\2026-03-12",
-      "e:\\Projects\\newsflow\\tests\\test_agents"
+      "e:\\Projects\\newsflow\\tests\\test_agents",
+      "C:\\Users\\hp\\.claude\\skills\\skill-creator\\scripts"
     ]
   }
 }

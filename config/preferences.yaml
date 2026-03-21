@@ -13,14 +13,15 @@ priority_rules:
   P0_must_include:
     - "Product or model launch/announcement from: Meta, Apple, NVIDIA, Google (DeepMind included), OpenAI, Anthropic, or Microsoft — own announcements are always P0; credible third-party reporting of a real, verified launch is also P0. NOT eligible: pure opinion/review with no new product info, leaks, rumours, consumer entertainment (games, media, streaming)."
     - "AI making a significant real-world impact in any domain — tools or systems that change how software is built, agentic AI demonstrating new capabilities, or AI producing a verifiable breakthrough or shift in fields like security, scientific research, medicine, climate, manufacturing, or other industries"
-    - "India-specific startups: significant product launch, funding >$10M, or notable founder story"
+    - "India tech ecosystem (any of the following): funding round >$5M, AI product launch by Indian company, notable exit or acquisition, notable founder/operator profile, senior hire or team move at a funded startup, or Indian AI/digital infrastructure policy"
     - "Non-AI hardware or software representing a genuine direction change (new form factor, platform shift, new category)"
     - "Funding rounds >$50M in the AI space — applies to both established big tech AND emerging AI-native companies such as Cursor, Perplexity, xAI, Mistral, Cohere, Character.AI, Midjourney, Runway, ElevenLabs, Stability AI, and similar players"
     - "Major product launch, valuation milestone (≥$10B), or high-profile strategic move (acquisition, key executive poaching, major partnership) by a rising AI-native company that is reshaping how software is built or used"
 
   P1_high:
     - "AI products from smaller or emerging startups"
-    - "India tech industry shifts: IT sector disruption, outsourcing changes, Indian SaaS"
+    - "India tech industry shifts: IT sector disruption, outsourcing changes, Indian SaaS, India BPO automation"
+    - "India fintech: AI in payments, UPI innovations, neobank product launches, embedded finance"
     - "Funding $10-50M in AI"
     - "Business strategy: go-to-market, pricing, Series B+ company moves"
     - "SaaS disruption stories with clear product or market angle"
@@ -35,7 +36,7 @@ priority_rules:
     - "Major healthcare breakthroughs: significant disease cures, treatments, or medical inventions that could fundamentally change an industry or go mainstream — regardless of tech angle"
 
   P3_skip:
-    - "Crypto or Web3 (unless direct AI intersection)"
+    - "Crypto or Web3 (unless: major institutional adoption, India crypto regulation, protocol launch affecting developer infra, or direct AI intersection)"
     - "Pure code tutorials or code walkthroughs"
     - "Sponsor or ad content within newsletters"
     - "Incremental consumer hardware with no meaningful leap"
@@ -77,13 +78,16 @@ dedup:
     - ettech
     - techcrunch
     - tldr_ai
-    - tldr_tech
+    - tldr             # base TLDR newsletter takes precedence over sub-variants in dedup
     - tldr_dev
+    - tldr_devops
+    - tldr_fintech
+    - tldr_crypto
     - custom
 
 time_budget:
   target_duration_min: 90
-  min_duration_min: 45  # trigger expansion_mode re-run if script falls below this
+  min_duration_min: 40  # trigger expansion_mode re-run if script falls below this
   p0_deep_dive:
     duration_min_per_article: "5-7"
     max_articles: 6

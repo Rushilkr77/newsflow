@@ -53,6 +53,16 @@ For each, report:
 
 Also check: does the summary sound like it was written for ears (short sentences, no bullet points in the text itself)?
 
+**Structured header check** — the summarizer produces section headers in `summary_text`. Count how many are present per priority tier:
+
+| Priority | Required headers | Min expected |
+|---------|-----------------|--------------|
+| P0 | CORE NEWS, SURROUNDING IMPACT, COMPETITOR CONTEXT, LAUNCH RATIONALE, HOW IT WORKS, PM INTERVIEW EDGE | 6 |
+| P1 | CORE NEWS + IMPACT, HOW + WHY, PM EDGE | 3 |
+| P2 | CORE NEWS, PM EDGE | 2 |
+
+Flag any summary where the header count falls below the minimum — this indicates a token budget or scraping issue (summarizer didn't produce the full structured output).
+
 ## Step 4 — Script quality check
 
 From `podcast_script.json`, check:
@@ -101,11 +111,41 @@ Segments: cold_open ✓ intro ✓ ai_updates ✓ funding_ma ✓ india_tech ✗ p
 Top takeaways: 3 ✓
 SSML present: ✓
 
+### Expansion / Coverage
+Expansion triggered: yes
+Trigger reason: gap-driven (2 articles uncovered)
+coverage_gaps_detected: "OpenAI launches o3", "Anthropic raises $2B"
+expansion_minimal_gain: no
+
 ### Issues Found
 1. harper_carroll: 0 articles (is today Wed/Thu? if yes, investigate parser)
 2. P1 summary word count too low: 87 words for "{title}"
 
 ### Overall: PASS / NEEDS ATTENTION / FAIL
+```
+
+## Step 5b — Expansion and coverage gap report
+
+Read `workspace/{date}/pipeline.log` (or the console log if available) and search for these events:
+
+**`coverage_gaps_detected`** — reports articles the script writer skipped or undercovered.
+- Extract: how many articles had gaps, and which titles/IDs were affected
+- If present: report as a content quality issue — those stories were not narrated
+
+**`expansion_minimal_gain`** — logged when the pipeline ran an expansion pass but the episode was already covering all articles (duration short but coverage complete).
+- If present: this is a **quality win**, not a problem. Report it as such.
+
+**Expansion trigger reason** — determine what drove the expansion pass:
+- **Gap-driven**: `coverage_gaps_detected` was logged before expansion → specific articles were missing from narration
+- **Duration-driven**: episode was under 45 min but no gaps detected → expansion added depth, not missing articles
+
+Report format addition to Step 6:
+```
+### Expansion / Coverage
+Expansion triggered: yes/no
+Trigger reason: gap-driven (N articles uncovered) / duration-driven / none
+coverage_gaps_detected: "{title1}", "{title2}" [or "none"]
+expansion_minimal_gain: yes (all articles covered, episode short) / no
 ```
 
 ## Quick Dedup Check (bonus)

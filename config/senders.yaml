@@ -9,38 +9,75 @@
 #
 # Alternatively, add sender emails to NEWSLETTER_SENDERS in .env to use the
 # generic parser without touching this file.
+#
+# IMPORTANT: TLDR variants all share dan@tldrnewsletter.com. Variant detection uses
+# substring matching, so more specific display_name_match entries MUST come before
+# the base "TLDR" catch-all. Order: AI → DevOps → Dev → Fintech → Crypto → TLDR (base).
 
 senders:
   - id: tldr_ai
     enabled: true
-    lookback_days: 1
+    lookback_days: 2
     sender_email: dan@tldrnewsletter.com
     variant_detection: from_display_name
     display_name_match: "TLDR AI"
     priority_default: P0
     parser: tldr
 
-  - id: tldr_tech
-    enabled: true
-    lookback_days: 1
-    sender_email: dan@tldrnewsletter.com
-    variant_detection: from_display_name
-    display_name_match: "TLDR"
-    priority_default: P1
-    parser: tldr
-
+  # More-specific TLDR variants must come BEFORE tldr (the base "TLDR" catch-all)
+  # ── Mandatory TLDR sub-newsletter ─────────────────────────────────────────
   - id: tldr_dev
     enabled: true
-    lookback_days: 1
+    lookback_days: 2
     sender_email: dan@tldrnewsletter.com
     variant_detection: from_display_name
-    display_name_match: "TLDR DEV"
+    display_name_match: "TLDR Dev"
     priority_default: P2
+    parser: tldr
+
+  # ── Optional TLDR sub-newsletters (fallback volume sources) ───────────────
+  # These are fetched daily but their articles only fill the episode if the
+  # mandatory sources (tldr_ai, tldr, tldr_dev) haven't reached the target length.
+  # Articles are P2 by default — the time budget naturally gates inclusion.
+  - id: tldr_devops
+    enabled: true
+    lookback_days: 2
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR DevOps"
+    priority_default: P2
+    parser: tldr
+
+  - id: tldr_fintech
+    enabled: true
+    lookback_days: 2
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR Fintech"
+    priority_default: P2
+    parser: tldr
+
+  - id: tldr_crypto
+    enabled: true
+    lookback_days: 2
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR Crypto"
+    priority_default: P2
+    parser: tldr
+
+  - id: tldr
+    enabled: true
+    lookback_days: 2
+    sender_email: dan@tldrnewsletter.com
+    variant_detection: from_display_name
+    display_name_match: "TLDR"       # Base TLDR newsletter — catch-all, must be LAST among TLDR variants
+    priority_default: P1
     parser: tldr
 
   - id: techcrunch
     enabled: true
-    lookback_days: 1
+    lookback_days: 2
     sender_email: newsletters@techcrunch.com
     variant_detection: none
     priority_default: P0
@@ -56,7 +93,7 @@ senders:
 
   - id: ettech
     enabled: true
-    lookback_days: 1
+    lookback_days: 2
     sender_email: newsletter@ettech.com
     variant_detection: none
     priority_default: P1
@@ -64,7 +101,7 @@ senders:
 
   - id: et_ai
     enabled: true
-    lookback_days: 1
+    lookback_days: 2
     sender_email: newsletter@economictimesnews.com
     variant_detection: from_display_name
     display_name_match: "ET AI"
@@ -75,9 +112,7 @@ senders:
 excluded_variants:
   - sender: dan@tldrnewsletter.com
     patterns:
-      - "TLDR CRYPTO"
-      - "TLDR FINTECH"
-      - "TLDR FOUNDERS"
+      - "TLDR FOUNDERS"              # Out of scope for AI PM prep
   - sender: newsletter@economictimesnews.com
     exclude_display_names:
-      - "The Economic Times"
+      - "The Economic Times"         # Non-AI ET newsletter — exclude

@@ -144,8 +144,11 @@ class IngestionAgent:
         self._excluded_variants = self._senders_config.get("excluded_variants", [])
         self._sender_lookback = _build_sender_lookback_map(self._senders_config)
 
-        # Senders that should keep only the most recent email within their window
-        # (weekly newsletters where we always want the latest issue, not all issues in the window)
+        # Senders that should keep only the most recent email within their window.
+        # Applies to all senders with lookback_days > 1 — but keyed by
+        # (sender_email, display_name) so TLDR AI and TLDR Tech are tracked
+        # separately (both survive) while two days of the same variant
+        # (e.g. et_ai from March 17 and March 18) collapse to just the latest.
         self._keep_latest_only: set[str] = {
             s["sender_email"].lower()
             for s in self._senders_config.get("senders", [])
@@ -177,7 +180,7 @@ class IngestionAgent:
             weekly_senders=sorted(self._keep_latest_only),
         )
 
-    def run(self) -> list[RawArticle]:
+    def run(self, date: str | None = None) -> list[RawArticle]:
         self._service = self._get_gmail_service()
         messages = self._fetch_messages()
         log.info("gmail_fetch_complete", message_count=len(messages))
@@ -185,7 +188,7 @@ class IngestionAgent:
         # Apply per-sender lookback filter — query used max(lookback_days) globally,
         # so we trim here to each sender's actual window and keep only the latest
         # email for weekly senders (e.g. harper_carroll).
-        messages = self._filter_messages_by_lookback(messages)
+        messages = self._filter_messages_by_lookback(messages, date=date)
         log.info("after_lookback_filter", message_count=len(messages))
 
         all_articles: list[RawArticle] = []
@@ -220,8 +223,10 @@ class IngestionAgent:
 
         return deduped
 
-    def _get_message_metadata(self, msg_id: str) -> tuple[str, datetime]:
-        """Fetch only From + Date headers (lightweight metadata call — no body download)."""
+    def _get_message_metadata(self, msg_id: str) -> tuple[str, str, datetime]:
+        """Fetch only From + Date headers (lightweight metadata call — no body download).
+        Returns (sender_email, from_display_name, timestamp).
+        """
         msg = self._service.users().messages().get(
             userId="me",
             id=msg_id,
@@ -231,37 +236,48 @@ class IngestionAgent:
         headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
         from_raw = headers.get("From", "")
         date_str = headers.get("Date", "")
-        sender_email, _ = self._parse_from_header(from_raw)
+        sender_email, from_display_name = self._parse_from_header(from_raw)
         timestamp = self._parse_date(date_str)
-        return sender_email, timestamp
+        return sender_email, from_display_name, timestamp
 
-    def _filter_messages_by_lookback(self, msg_ids: list[str]) -> list[str]:
+    def _filter_messages_by_lookback(self, msg_ids: list[str], date: str | None = None) -> list[str]:
         """
         Apply per-sender lookback filtering after the broad Gmail query.
         - Senders with lookback_days=1: discard emails older than 1 day.
         - Senders with lookback_days>1 (weekly newsletters): keep only the most
           recent email within their window.
         Falls back to including the message if metadata fetch fails.
+
+        `date` pins "now" to end-of-day on the pipeline date so that re-runs
+        and next-day processing don't silently drop emails from the intended date.
         """
-        now = datetime.utcnow()
+        if date:
+            from datetime import date as _date
+            d = _date.fromisoformat(date)
+            now = datetime(d.year, d.month, d.day, 23, 59, 59)
+        else:
+            now = datetime.utcnow()
 
         # Collect metadata for each message
-        msg_info: list[tuple[str, str, datetime]] = []
+        msg_info: list[tuple[str, str, str, datetime]] = []
         for msg_id in msg_ids:
             try:
-                sender_email, timestamp = self._get_message_metadata(msg_id)
-                msg_info.append((msg_id, sender_email, timestamp))
+                sender_email, display_name, timestamp = self._get_message_metadata(msg_id)
+                msg_info.append((msg_id, sender_email, display_name, timestamp))
             except Exception as e:
                 log.warning("metadata_fetch_failed", msg_id=msg_id, error=str(e))
-                msg_info.append((msg_id, "", now))  # include conservatively
+                msg_info.append((msg_id, "", "", now))  # include conservatively
 
         today_weekday = datetime.now(_IST).weekday()  # IST weekday for gate checks
 
         filtered: list[str] = []
-        # For weekly senders: track the single most-recent email within the window
-        latest_per_sender: dict[str, tuple[str, datetime]] = {}
+        # For senders with lookback_days > 1: track the most-recent email per
+        # (sender_email, display_name) pair. This means TLDR AI and TLDR Tech
+        # are tracked separately (both survive), but two days of the same
+        # newsletter variant collapse to just the latest one.
+        latest_per_variant: dict[tuple[str, str], tuple[str, datetime]] = {}
 
-        for msg_id, sender_email, timestamp in msg_info:
+        for msg_id, sender_email, display_name, timestamp in msg_info:
             # Weekday gate: skip senders not allowed on today's day-of-week (IST)
             if sender_email in self._sender_weekday_gates:
                 allowed = self._sender_weekday_gates[sender_email]
@@ -287,17 +303,19 @@ class IngestionAgent:
                 continue
 
             if sender_email in self._keep_latest_only:
-                prev = latest_per_sender.get(sender_email)
+                variant_key = (sender_email, display_name.lower())
+                prev = latest_per_variant.get(variant_key)
                 if prev is None or timestamp > prev[1]:
-                    latest_per_sender[sender_email] = (msg_id, timestamp)
+                    latest_per_variant[variant_key] = (msg_id, timestamp)
             else:
                 filtered.append(msg_id)
 
-        # Add the single most-recent email for each weekly sender
-        for sender_email, (msg_id, ts) in latest_per_sender.items():
+        # Add the single most-recent email for each (sender, display_name) variant
+        for (sender_email, display_name_key), (msg_id, ts) in latest_per_variant.items():
             log.info(
-                "weekly_newsletter_selected",
+                "latest_variant_selected",
                 sender=sender_email,
+                display_name=display_name_key,
                 email_date=ts.strftime("%Y-%m-%d"),
             )
             filtered.append(msg_id)
@@ -373,7 +391,13 @@ class IngestionAgent:
         )
 
         if source_id is None or parser is None:
-            log.debug("email_skipped", from_raw=from_raw, subject=subject)
+            log.debug(
+                "email_skipped",
+                from_raw=from_raw,
+                display_name=from_display_name,
+                sender_email=sender_email,
+                subject=subject.encode("ascii", errors="replace").decode("ascii"),
+            )
             return [], None
 
         body = self._extract_body(msg["payload"], source_id)
@@ -389,10 +413,11 @@ class IngestionAgent:
         }
 
         articles = parser.parse(body, email_metadata)
+        safe_subject = subject.encode("ascii", errors="replace").decode("ascii")
         log.info(
             "email_parsed",
             source_id=source_id,
-            subject=subject,
+            subject=safe_subject,
             article_count=len(articles),
         )
         return articles, msg_id

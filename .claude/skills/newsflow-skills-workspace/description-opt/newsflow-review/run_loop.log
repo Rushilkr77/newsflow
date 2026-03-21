@@ -1,0 +1,316 @@
+Could not find platform dependent libraries <exec_prefix>
+Split: 12 train, 7 test (holdout=0.4)
+
+============================================================
+Iteration 1/5
+Description: Review today's NewsFlow pipeline output quality against DESIGN.md targets. Activate when the user says "review today's output", "check quality", "how did the pipeline do", "quality check", "review the episode", "check summaries", "how many articles", or asks about episode quality metrics.
+============================================================
+Could not find platform dependent libraries <exec_prefix>
+Train: 12/12 correct, precision=100% recall=100% accuracy=100% (236.3s)
+  [PASS] rate=1/1 expected=True: review today's summaries and tell me if the word counts are 
+  [PASS] rate=1/1 expected=True: summarize the top 5 AI articles from today's episode for me
+  [PASS] rate=1/1 expected=True: how many articles came through from each source this morning
+  [PASS] rate=1/1 expected=True: quick sanity check on the podcast script quality before my c
+  [PASS] rate=1/1 expected=True: how did the pipeline do today? want to check coverage before
+  [PASS] rate=1/1 expected=True: check quality of today's run — the MP3 felt shorter than u
+  [PASS] rate=0/1 expected=False: can we increase the target episode duration from 60 minutes 
+  [PASS] rate=0/1 expected=False: how many P0 articles should the curator ideally produce per 
+  [PASS] rate=0/1 expected=False: the episode felt thin on AI content today — is TLDR AI bei
+  [PASS] rate=0/1 expected=False: run the pipeline for yesterday's date, 2026-03-15
+  [PASS] rate=0/1 expected=False: pipeline isn't running this morning — can you debug what's
+  [PASS] rate=0/1 expected=False: the tldr parser is returning empty articles — can you fix 
+Test : 7/7 correct, precision=100% recall=100% accuracy=100% (0.0s)
+  [PASS] rate=1/1 expected=True: can you review the episode for today and give me a pass/fail
+  [PASS] rate=1/1 expected=True: what's the P0/P1/P2 breakdown for today's curation? trying t
+  [PASS] rate=1/1 expected=True: give me a quality report on workspace/today's date — I wan
+  [PASS] rate=0/1 expected=False: how does the ranking algorithm in curator.py decide which ar
+  [PASS] rate=0/1 expected=False: add Morning Brew newsletter as a new source to the pipeline
+  [PASS] rate=0/1 expected=False: update the summary word count targets in DESIGN.md to 400-60
+  [PASS] rate=0/1 expected=False: explain how the SSML markup in the script writer affects the
+
+All train queries passed on iteration 1!
+
+Exit reason: all_passed (iteration 1)
+Best score: 7/7 (iteration 1)
+{
+  "exit_reason": "all_passed (iteration 1)",
+  "original_description": "Review today's NewsFlow pipeline output quality against DESIGN.md targets. Activate when the user says \"review today's output\", \"check quality\", \"how did the pipeline do\", \"quality check\", \"review the episode\", \"check summaries\", \"how many articles\", or asks about episode quality metrics.",
+  "best_description": "Review today's NewsFlow pipeline output quality against DESIGN.md targets. Activate when the user says \"review today's output\", \"check quality\", \"how did the pipeline do\", \"quality check\", \"review the episode\", \"check summaries\", \"how many articles\", or asks about episode quality metrics.",
+  "best_score": "7/7",
+  "best_train_score": "12/12",
+  "best_test_score": "7/7",
+  "final_description": "Review today's NewsFlow pipeline output quality against DESIGN.md targets. Activate when the user says \"review today's output\", \"check quality\", \"how did the pipeline do\", \"quality check\", \"review the episode\", \"check summaries\", \"how many articles\", or asks about episode quality metrics.",
+  "iterations_run": 1,
+  "holdout": 0.4,
+  "train_size": 12,
+  "test_size": 7,
+  "history": [
+    {
+      "iteration": 1,
+      "description": "Review today's NewsFlow pipeline output quality against DESIGN.md targets. Activate when the user says \"review today's output\", \"check quality\", \"how did the pipeline do\", \"quality check\", \"review the episode\", \"check summaries\", \"how many articles\", or asks about episode quality metrics.",
+      "train_passed": 12,
+      "train_failed": 0,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "review today's summaries and tell me if the word counts are hitting targets \u00e2\u20ac\u201d especially for ai_updates segment",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "summarize the top 5 AI articles from today's episode for me",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how many articles came through from each source this morning? Is there any duplication?",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "quick sanity check on the podcast script quality before my commute \u00e2\u20ac\u201d is the duration and segment count right?",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how did the pipeline do today? want to check coverage before heading to the gym",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "check quality of today's run \u00e2\u20ac\u201d the MP3 felt shorter than usual, want to make sure nothing was dropped",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "can we increase the target episode duration from 60 minutes to 90 minutes in preferences.yaml?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how many P0 articles should the curator ideally produce per run according to DESIGN.md?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "the episode felt thin on AI content today \u00e2\u20ac\u201d is TLDR AI being included properly? check the funnel",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "run the pipeline for yesterday's date, 2026-03-15",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "pipeline isn't running this morning \u00e2\u20ac\u201d can you debug what's wrong?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "the tldr parser is returning empty articles \u00e2\u20ac\u201d can you fix it?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        }
+      ],
+      "test_passed": 7,
+      "test_failed": 0,
+      "test_total": 7,
+      "test_results": [
+        {
+          "query": "can you review the episode for today and give me a pass/fail against the DESIGN.md targets?",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "what's the P0/P1/P2 breakdown for today's curation? trying to gauge if the curator is working well",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "give me a quality report on workspace/today's date \u00e2\u20ac\u201d I want to know if there are any hallucinations in the script",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how does the ranking algorithm in curator.py decide which articles are P0?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "add Morning Brew newsletter as a new source to the pipeline",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "update the summary word count targets in DESIGN.md to 400-600 words per P0",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "explain how the SSML markup in the script writer affects the TTS output",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        }
+      ],
+      "passed": 12,
+      "failed": 0,
+      "total": 12,
+      "results": [
+        {
+          "query": "review today's summaries and tell me if the word counts are hitting targets \u00e2\u20ac\u201d especially for ai_updates segment",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "summarize the top 5 AI articles from today's episode for me",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how many articles came through from each source this morning? Is there any duplication?",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "quick sanity check on the podcast script quality before my commute \u00e2\u20ac\u201d is the duration and segment count right?",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how did the pipeline do today? want to check coverage before heading to the gym",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "check quality of today's run \u00e2\u20ac\u201d the MP3 felt shorter than usual, want to make sure nothing was dropped",
+          "should_trigger": true,
+          "trigger_rate": 1.0,
+          "triggers": 1,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "can we increase the target episode duration from 60 minutes to 90 minutes in preferences.yaml?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "how many P0 articles should the curator ideally produce per run according to DESIGN.md?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "the episode felt thin on AI content today \u00e2\u20ac\u201d is TLDR AI being included properly? check the funnel",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "run the pipeline for yesterday's date, 2026-03-15",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "pipeline isn't running this morning \u00e2\u20ac\u201d can you debug what's wrong?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        },
+        {
+          "query": "the tldr parser is returning empty articles \u00e2\u20ac\u201d can you fix it?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 1,
+          "pass": true
+        }
+      ]
+    }
+  ]
+}

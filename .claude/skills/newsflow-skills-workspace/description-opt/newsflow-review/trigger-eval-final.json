@@ -8,7 +8,7 @@
     "should_trigger": true
   },
   {
-    "query": "how many articles came through from each source this morning? concerned ETtech is underrepresented",
+    "query": "how many articles came through from each source this morning? Is there any duplication?",
     "should_trigger": true
   },
   {
@@ -17,7 +17,7 @@
   },
   {
     "query": "the episode felt thin on AI content today — is TLDR AI being included properly? check the funnel",
-    "should_trigger": true
+    "should_trigger": false
   },
   {
     "query": "review today's summaries and tell me if the word counts are hitting targets — especially for ai_updates segment",
@@ -32,11 +32,7 @@
     "should_trigger": true
   },
   {
-    "query": "give me a quality report on today's workspace — I want to know if there are any hallucinations in the script",
-    "should_trigger": true
-  },
-  {
-    "query": "the harper carroll source has been quiet lately — is it contributing to today's episode or is the parser broken?",
+    "query": "give me a quality report on workspace/today's date — I want to know if there are any hallucinations in the script",
     "should_trigger": true
   },
   {
@@ -61,10 +57,10 @@
   },
   {
     "query": "summarize the top 5 AI articles from today's episode for me",
-    "should_trigger": false
+    "should_trigger": true
   },
   {
-    "query": "run the pipeline for yesterday's date",
+    "query": "run the pipeline for yesterday's date, 2026-03-15",
     "should_trigger": false
   },
   {

@@ -25,7 +25,7 @@ def detect_tldr_variant(from_display_name: str) -> str | None:
     if "TLDR FOUNDERS" in name:
         return None  # skip
     if "TLDR" in name:
-        return "tldr_tech"  # plain "TLDR" display name = Tech edition
+        return "tldr"  # plain "TLDR" display name = base TLDR newsletter
     return None
 
 

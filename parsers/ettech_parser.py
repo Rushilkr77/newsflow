@@ -1,26 +1,34 @@
 """
 ETtech Top 5 newsletter parser — HTML email (multipart/mixed).
 
-Confirmed structure:
-  Daily Top 5
-  A closer look at today's biggest tech and startup stories...
+Confirmed structure (as of 2026-03):
+  Each story is a block containing:
+    <div style="...font-size:26px;font-weight: bold...">HEADLINE</div>
+    <div>...body paragraphs with inline nltrack/native links...</div>
+    <td>Liked reading? Share this story</td>   ← story separator
 
-  [Story 1 headline + teaser paragraph + Read More link]
-  [Story 2 ...]
-  ... (exactly 5 stories)
+  5 stories total. Full articles are behind the ET paywall.
+
+Strategy: extract titles only. The scraper detects source=="ettech" and
+searches inc42.com (primary) then DuckDuckGo (secondary) to get full article
+content without hitting the paywall. url is set to a per-article placeholder
+since the email URLs are not scrapeable.
 
 India-focused: Indian startups, IT industry, government policy.
-Full article may be behind ET paywall — snippet fallback handled in scraper.
 """
 import re
 import uuid
 from datetime import datetime
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from models.article import RawArticle
 from models.enums import Source
 from parsers.base_parser import BaseParser
+
+# ETtech headline divs use inline style with these markers
+_HEADLINE_STYLE_RE = re.compile(r"font-size\s*:\s*2[46]px", re.IGNORECASE)
+_LIKED_READING_RE = re.compile(r"liked\s+reading", re.IGNORECASE)
 
 
 class ETtechParser(BaseParser):
@@ -32,52 +40,33 @@ class ETtechParser(BaseParser):
         soup = BeautifulSoup(email_body, "lxml")
         articles: list[RawArticle] = []
 
-        # Find all "Read More" links — each is one story
-        read_more_links = soup.find_all("a", string=re.compile(r"read\s+more", re.IGNORECASE))
+        # Find all headline divs (font-size 24–26px bold)
+        headline_divs = [
+            tag for tag in soup.find_all("div")
+            if _HEADLINE_STYLE_RE.search(tag.get("style", ""))
+            and len(tag.get_text(strip=True)) > 20
+        ]
 
-        for link in read_more_links:
-            href = link.get("href", "")
-            if not href or not href.startswith("http"):
+        for hdiv in headline_divs:
+            title = hdiv.get_text(strip=True)
+            if not title or len(title) < 10:
                 continue
 
-            url = self._clean_url(href)
-
-            # Walk up the DOM to find the containing block with title + teaser
-            container = link.find_parent("td") or link.find_parent("div") or link.find_parent("p")
-            if not container:
-                continue
-
-            # Get all text in the container, excluding the "Read More" text
-            full_text = container.get_text(separator=" ", strip=True)
-            full_text = re.sub(r"\s*read\s+more\s*", "", full_text, flags=re.IGNORECASE).strip()
-
-            if not full_text or len(full_text) < 10:
-                continue
-
-            # Try to split into headline + teaser
-            # ETtech usually has a bold headline followed by teaser text
-            headline_tag = container.find(["h1", "h2", "h3", "h4", "strong", "b"])
-            if headline_tag:
-                title = headline_tag.get_text(strip=True)
-                snippet = full_text.replace(title, "").strip().lstrip(":").strip()
-            else:
-                # Fallback: first sentence as title
-                sentences = full_text.split(". ", 1)
-                title = sentences[0].strip()
-                snippet = sentences[1].strip() if len(sentences) > 1 else ""
-
-            if not title or len(title) < 5:
-                continue
+            # Each article gets a unique placeholder URL. The scraper
+            # detects source=="ettech" and performs an inc42/DDG search
+            # using the title instead of trying to scrape this URL.
+            article_id = str(uuid.uuid4())
+            placeholder_url = f"https://ettech.placeholder/{article_id}"
 
             try:
                 articles.append(
                     RawArticle(
-                        id=str(uuid.uuid4()),
+                        id=article_id,
                         title=title,
-                        url=url,  # type: ignore[arg-type]
+                        url=placeholder_url,  # type: ignore[arg-type]
                         source=Source.ETTECH,
                         sender_email=sender_email,
-                        snippet=snippet,
+                        snippet="",  # no snippet — scraper will fetch full text via search
                         section="top5",
                         timestamp=timestamp,
                         newsletter_date=newsletter_date,

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(python -c \":*)",
+      "Bash(powershell -Command \"Get-PSDrive C | Select-Object Used,Free\")",
+      "Bash(du -sh ~/.cache/huggingface/hub/models--*)",
+      "Bash(pip install:*)"
+    ]
+  }
+}

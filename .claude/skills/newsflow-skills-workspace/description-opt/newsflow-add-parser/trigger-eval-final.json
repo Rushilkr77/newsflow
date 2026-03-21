@@ -25,7 +25,7 @@
   },
   {
     "query": "implement et_ai — it's the Economic Times AI newsletter from ettech@email.indiatimes.com, different format from ETtech",
-    "should_trigger": true
+    "should_trigger": false
   },
   {
     "query": "benn stancil's data newsletter (benn@substack.com) just got added to our reading list, can you get it into the pipeline?",
@@ -72,7 +72,7 @@
     "should_trigger": false
   },
   {
-    "query": "pipeline ran this morning but workspace/today only has raw_articles.json — nothing got curated",
+    "query": "pipeline ran this morning but workspace/2026-03-16 only has raw_articles.json — nothing got curated",
     "should_trigger": false
   },
   {

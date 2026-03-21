@@ -40,8 +40,11 @@ _SECTION_MAP = {
 
 _SOURCE_MAP = {
     "tldr_ai": Source.TLDR_AI,
-    "tldr_tech": Source.TLDR_TECH,
+    "tldr": Source.TLDR,
     "tldr_dev": Source.TLDR_DEV,
+    "tldr_devops": Source.TLDR_DEVOPS,
+    "tldr_fintech": Source.TLDR_FINTECH,
+    "tldr_crypto": Source.TLDR_CRYPTO,
 }
 
 

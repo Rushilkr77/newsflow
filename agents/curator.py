@@ -16,7 +16,7 @@ import structlog
 import yaml
 
 from models.article import CuratedArticle, RawArticle
-from models.enums import Category, Priority
+from models.enums import Category, Priority, Source
 from utils.llm_client import chat
 
 log = structlog.get_logger(__name__)
@@ -28,8 +28,11 @@ _SOURCE_PRIORITY: list[str] = [
     "ettech",
     "techcrunch",
     "tldr_ai",
-    "tldr_tech",
+    "tldr",
     "tldr_dev",
+    "tldr_devops",
+    "tldr_fintech",
+    "tldr_crypto",
     "custom",
 ]
 
@@ -96,7 +99,7 @@ class CuratorAgent:
         Effect: priority is capped at P1 after LLM classification.
         """
         _HC = "harper_carroll"
-        _TLDR_SOURCES = {"tldr_ai", "tldr_tech", "tldr_dev"}
+        _TLDR_SOURCES = {"tldr_ai", "tldr", "tldr_dev"}
 
         # Pre-compute keyword sets for all TLDR articles in this batch
         tldr_kw_sets: list[frozenset] = [
@@ -198,9 +201,9 @@ class CuratorAgent:
             self._prefs.get("dedup", {}).get("semantic_dedup_threshold", 0.82)
         )
 
-        # Lazy-load and cache the embedding model
+        # Lazy-load and cache the embedding model — force CPU so Ollama keeps full GPU VRAM
         if not hasattr(self, "_embed_model") or self._embed_model is None:
-            self._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+            self._embed_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
         titles = [a.title for a in articles]
         raw_embs = self._embed_model.encode(titles, convert_to_numpy=True)
@@ -324,7 +327,7 @@ Return ONLY a JSON array (no markdown, no explanation):
   {{
     "index": 0,
     "priority": "P0" | "P1" | "P2" | "P3",
-    "category": "big_tech_launches" | "ai_products_tools" | "product_innovations" | "india_startups" | "funding_ma" | "industry_strategy" | "engineering_tech" | "policy_safety",
+    "category": "big_tech_launches" | "ai_products_tools" | "product_innovations" | "india_tech" | "funding_ma" | "industry_strategy" | "engineering_tech" | "policy_safety",
     "relevance_score": 0-100,
     "discussion_hooks": ["one insight for AI PM or developer interview at a Series B+ startup"],
     "estimated_podcast_seconds": 30-420
@@ -376,6 +379,9 @@ Return ONLY a JSON array (no markdown, no explanation):
             relevance_score = float(item_data.get("relevance_score", 50))
             if is_context_only:
                 relevance_score = max(0.0, relevance_score - 15)
+            # Boost ET sources to counteract empty-snippet classification uncertainty
+            if a.source in (Source.ETTECH, Source.ET_AI):
+                relevance_score = min(100.0, relevance_score + 10)
 
             curated_articles.append(
                 CuratedArticle(
@@ -437,7 +443,7 @@ Categories:
 - big_tech_launches: Launches or announcements from Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft — product, model, or acquisition
 - ai_products_tools: AI-powered products, tools, or systems with real-world impact — developer tools, agentic AI, AI applied to security/science/medicine/other domains
 - product_innovations: Non-AI products/hardware representing a real direction change (new form factor, platform, category)
-- india_startups: Indian startup ecosystem — ONLY companies founded or headquartered in India
+- india_tech: Indian tech ecosystem — companies founded/headquartered in India, India IT/BPO sector shifts, India fintech (UPI, neobanks, payments), Indian govt AI/digital policy; use for funding rounds, product launches, exits, notable hires, and founder profiles from the Indian ecosystem
 - funding_ma: Funding rounds, M&A, acquisitions, valuations
 - industry_strategy: SaaS disruption, go-to-market moves, Series B+ company strategy
 - engineering_tech: Technical deep dives, infra, open source (no product angle) — typically P2

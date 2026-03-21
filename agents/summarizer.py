@@ -1,24 +1,26 @@
 """
 Agent 3: Summarizer
 Fetches full article content via the MCP article fetcher, then generates tiered
-summaries with a dual-lens structure (technical + product/market).
+summaries with structured coverage factors mapped to script-writer needs.
 
 Model: qwen2.5:7b (via SUMMARIZER_LOCAL_MODEL env var) — better section discipline
 and word-count adherence than 3B for the structured P0/P1 prompts.
 
 Summary structure:
-  P0 (300-500 words): CONTEXT → WHAT HAPPENED → TECHNICAL ANGLE →
-                      PRODUCT/MARKET ANGLE → KEY TAKEAWAY → INTERVIEW EDGE
-  P1 (100-200 words): WHAT HAPPENED → TECHNICAL + PRODUCT ANGLE → KEY TAKEAWAY
-  P2 (30-50 words):   Single spoken paragraph (snippet only, no scraping)
+  P0 (400-500 words): CORE NEWS → SURROUNDING IMPACT → COMPETITOR CONTEXT →
+                      LAUNCH RATIONALE → HOW IT WORKS → PM INTERVIEW EDGE
+  P1 (150-200 words): CORE NEWS + IMPACT → HOW + WHY → PM EDGE
+  P2 (60-80 words):   CORE NEWS → PM EDGE  (enough for a ~30-second mention)
 """
 import os
+from urllib.parse import urlparse
 
 import structlog
 
 from mcp_servers.article_fetcher_server import fetch_article_content
 from models.article import ArticleSummary, CuratedArticle
 from models.enums import Priority, Source
+from scraper.ddg_scraper import DDGScraper
 from scraper.inc42_scraper import Inc42Scraper
 from utils.llm_client import chat
 
@@ -31,6 +33,15 @@ _SUMMARIZER_LOCAL_MODEL = os.getenv("SUMMARIZER_LOCAL_MODEL")
 _ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
 
 _inc42_scraper = Inc42Scraper()
+_ddg_scraper = DDGScraper()
+
+
+def _url_domain(url: str) -> str | None:
+    """Extract domain from URL for DDG skip-domain hint."""
+    try:
+        return urlparse(url).netloc.lower().removeprefix("www.") or None
+    except Exception:
+        return None
 
 
 class SummarizerAgent:
@@ -63,12 +74,17 @@ class SummarizerAgent:
         log.info("fetching_articles", count=len(to_fetch))
 
         for article in to_fetch:
-            text = fetch_article_content(str(article.url))
+            url_str = str(article.url)
+            skip_domain = _url_domain(url_str)
+
+            text = fetch_article_content(url_str)
             if text and len(text) >= 200:
                 article.full_text = text
                 log.debug("article_fetched", article_id=article.id, chars=len(text))
-            elif article.source in _ET_SOURCES:
-                # ET articles are often paywalled — try Inc42 as a fallback
+                continue
+
+            if article.source in _ET_SOURCES:
+                # ET articles are paywalled — search inc42 first (India tech coverage)
                 inc42_text = _inc42_scraper.search_and_fetch(article.title)
                 if inc42_text:
                     article.full_text = inc42_text
@@ -78,8 +94,19 @@ class SummarizerAgent:
                         title=article.title[:60],
                         chars=len(inc42_text),
                     )
-                else:
-                    log.debug("fetch_fallback_to_snippet", article_id=article.id)
+                    continue
+                # inc42 missed it — fall through to DDG below
+
+            # General DDG fallback for all sources (inc42 miss or non-ET source)
+            ddg_text = _ddg_scraper.search_and_fetch(article.title, skip_domain=skip_domain)
+            if ddg_text:
+                article.full_text = ddg_text
+                log.info(
+                    "ddg_fallback_used",
+                    article_id=article.id,
+                    title=article.title[:60],
+                    chars=len(ddg_text),
+                )
             else:
                 log.debug("fetch_fallback_to_snippet", article_id=article.id)
 
@@ -118,46 +145,49 @@ class SummarizerAgent:
 Source: {article.source.value}
 Full Text: {content[:4000]}
 
-Write a 300-500 word summary using EXACTLY this structure — no deviations:
-1. CONTEXT: What's the landscape/background (1-2 sentences)
-2. WHAT HAPPENED: The core announcement or launch (2-3 sentences)
-3. TECHNICAL ANGLE: What's technically interesting or novel (1-2 sentences)
-4. PRODUCT/MARKET ANGLE: Why this matters for users and the market (2-3 sentences)
-5. KEY TAKEAWAY: One sentence the listener should remember
-6. INTERVIEW EDGE: One insight showing both technical depth AND product awareness — useful in a Series B+ startup interview
+Write a 400-500 word summary using EXACTLY this structure — label each section:
+1. CORE NEWS: What exactly happened — one clear sentence.
+2. SURROUNDING IMPACT: Who is affected and how does this shift the broader ecosystem? (2-3 sentences)
+3. COMPETITOR CONTEXT: How does this change the competitive landscape? Skip this section if not applicable.
+4. LAUNCH RATIONALE: Why did they build/launch this now? What problem does it solve? (2-3 sentences)
+5. HOW IT WORKS: The interesting technical detail or implementation approach. (2-3 sentences)
+6. PM INTERVIEW EDGE: The non-obvious insight for a Series B+ AI PM interview. What would a strong PM candidate say about this? (2-3 sentences)
 
 Rules:
 - Short sentences. Active voice throughout.
 - No jargon without a one-phrase explanation
 - Write for ears, not eyes — no bullet points in output
-- Stay within 300-500 words strictly"""
+- Stay within 400-500 words strictly"""
 
-        return self._call_llm(prompt)
+        return self._call_llm(prompt, max_tokens=2048)
 
     def _summarize_p1(self, article: CuratedArticle, content: str) -> str:
         prompt = f"""Article: {article.title}
 Source: {article.source.value}
 Content: {content[:2000]}
 
-Write a 100-200 word summary using EXACTLY this structure:
-1. WHAT HAPPENED (1-2 sentences)
-2. TECHNICAL + PRODUCT ANGLE: Both the technical insight and market/product implication (2-3 sentences)
-3. KEY TAKEAWAY (1 sentence)
+Write a 150-200 word summary using EXACTLY this structure — label each section:
+1. CORE NEWS + IMPACT: What happened and who it affects. (2-3 sentences)
+2. HOW + WHY: Technical approach and launch rationale combined. (2-3 sentences)
+3. PM EDGE: One non-obvious insight for an AI PM interview. (1-2 sentences)
 
 Stay within word count strictly. No bullet points. Short sentences."""
 
-        return self._call_llm(prompt)
+        return self._call_llm(prompt, max_tokens=1536)
 
     def _summarize_p2(self, article: CuratedArticle) -> str:
         prompt = f"""Article: {article.title}
 Snippet: {article.snippet[:500]}
 
-Write a single 30-50 word paragraph covering what happened and why it matters.
-One or two short sentences. No headers. Written to be spoken aloud."""
+Write a 60-80 word summary using EXACTLY this structure — label each section:
+1. CORE NEWS: What happened — one clear sentence.
+2. PM EDGE: One non-obvious insight for an AI PM interview. (1-2 sentences)
 
-        return self._call_llm(prompt)
+No bullet points. Short sentences. Written to be spoken aloud."""
 
-    def _call_llm(self, prompt: str) -> str:
+        return self._call_llm(prompt, max_tokens=768)
+
+    def _call_llm(self, prompt: str, max_tokens: int = 1024) -> str:
         return chat(
             model_hint="claude-haiku-4-5",
             system=(
@@ -167,7 +197,7 @@ One or two short sentences. No headers. Written to be spoken aloud."""
                 "Be concise and direct. This will be spoken aloud. Short sentences. Active voice."
             ),
             user=prompt,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             local_model_override=_SUMMARIZER_LOCAL_MODEL,
         )
 
@@ -176,11 +206,11 @@ One or two short sentences. No headers. Written to be spoken aloud."""
     # -------------------------------------------------------------------------
 
     def _extract_key_takeaways(self, summary_text: str) -> list[str]:
-        """Extract KEY TAKEAWAY lines from the structured summary."""
+        """Extract CORE NEWS line from the structured summary as the key takeaway."""
         takeaways = []
         for line in summary_text.splitlines():
             stripped = line.strip()
-            if "KEY TAKEAWAY" in stripped.upper():
+            if "CORE NEWS" in stripped.upper():
                 parts = stripped.split(":", 1)
                 if len(parts) > 1 and parts[1].strip():
                     takeaways.append(parts[1].strip())
@@ -188,15 +218,16 @@ One or two short sentences. No headers. Written to be spoken aloud."""
         if not takeaways and summary_text:
             sentences = [s.strip() for s in summary_text.split(".") if s.strip()]
             if sentences:
-                takeaways.append(sentences[-1] + ".")
+                takeaways.append(sentences[0] + ".")
         return takeaways
 
     def _extract_interview_edges(self, summary_text: str) -> list[str]:
-        """Extract INTERVIEW EDGE lines from the structured P0 summary."""
+        """Extract PM INTERVIEW EDGE or PM EDGE lines from the structured summary."""
         edges = []
         for line in summary_text.splitlines():
             stripped = line.strip()
-            if "INTERVIEW EDGE" in stripped.upper():
+            upper = stripped.upper()
+            if "PM INTERVIEW EDGE" in upper or "PM EDGE" in upper:
                 parts = stripped.split(":", 1)
                 if len(parts) > 1 and parts[1].strip():
                     edges.append(parts[1].strip())

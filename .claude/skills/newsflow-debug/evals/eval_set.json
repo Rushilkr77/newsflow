@@ -4,7 +4,7 @@
     "should_trigger": true
   },
   {
-    "query": "the mp3 came out as 3 minutes instead of the usual 60-90, something is obviously wrong with today's run",
+    "query": "the mp3 came out less than 20 minutes instead of the usual 50-90, something is obviously wrong with today's run",
     "should_trigger": true
   },
   {

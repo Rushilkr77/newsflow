@@ -19,10 +19,10 @@ fallback:
   voice_reference_text: null   # transcript of the reference clip (required if voice_reference set)
 
 segment_routing:
-  # Chatterbox: short/punchy segments — expressiveness > sustained prosody
-  chatterbox: [cold_open, intro, quick_hits, closing]
-  # F5-TTS: long narrative segments — paragraph-level prosody > per-sentence expressiveness
-  f5_tts:     [ai_updates, funding, india_tech, product_strategy]
+  # Chatterbox: short/punchy segments (disabled — OOM on this machine even with GPU)
+  chatterbox: []
+  # F5-TTS: all segments (GTX 1650 Ti, CUDA 12.4 — ~15x faster than CPU)
+  f5_tts:     [cold_open, intro, quick_hits, closing, ai_updates, funding, india_tech, product_strategy]
 
 output:
   format: mp3

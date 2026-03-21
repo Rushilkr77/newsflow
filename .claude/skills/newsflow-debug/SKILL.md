@@ -1,6 +1,6 @@
 ---
 name: newsflow-debug
-description: Diagnose NewsFlow pipeline failures and bad outputs. Activate when the user says "pipeline failed", "debug", "something's wrong", "0 articles", "nothing scraped", "bad output", "broken", or describes unexpected results from any pipeline stage.
+description: Use this skill to diagnose and fix NewsFlow pipeline errors. Activate when the user reports an exception, traceback, or error message from any pipeline script (script_writer.py, curator.py, ingestion.py, audio_producer.py, etc.), or when a pipeline stage produced wrong/missing output. This includes: LLM producing malformed JSON, retries failing, missing checkpoint files, unexpected article counts, truncated output, or any runtime error during a pipeline run. Do NOT activate for: reviewing output quality, explaining how the pipeline works, changing configuration/preferences, or fixing parser logic for a specific source.
 ---
 
 # NewsFlow: Pipeline Debugger
@@ -57,6 +57,17 @@ Read the files that DO exist to understand what data made it through.
 - If count drops dramatically: LLM producing empty output or exception mid-batch
 - If using qwen2.5:7b with CPU offload: may be timing out — check model output
 - Word count violations (P0 summaries <100 words): prompt not being followed → log a prompt-tuning issue
+- **P0 structured header check**: count section headers in `summary_text` — a correct P0 summary has 6 headers (`CORE NEWS`, `SURROUNDING IMPACT`, `COMPETITOR CONTEXT`, `LAUNCH RATIONALE`, `HOW IT WORKS`, `PM INTERVIEW EDGE`). Fewer than 4 means the summarizer was cut short (token budget too tight or scraping returned too little content). P1 should have 3 (`CORE NEWS + IMPACT`, `HOW + WHY`, `PM EDGE`); P2 should have 2 (`CORE NEWS`, `PM EDGE`).
+
+### Script Writer / coverage failures (`podcast_script.json` missing, malformed, or missing articles)
+
+**Coverage signal warning**: `source_article_ids` on a segment records what was *fed into the LLM*, not what was actually narrated. Do **not** use it to determine whether an article was covered. The real coverage check is to search the article's title keywords in `content_plain` of the relevant segments — if keywords appear, the article was narrated; if absent, it was skipped.
+
+**New log events to search for in `pipeline.log`**:
+- `coverage_gaps_detected` — emitted when the gap detector found articles not covered in narration. Payload includes article IDs/titles. If present and expansion was triggered, look for the follow-up attempt.
+- `expansion_minimal_gain` — emitted when expansion ran but all articles were already covered (episode was just short on duration). Not a bug — means gap detection was clean.
+
+If `coverage_gaps_detected` appears but articles are still missing after expansion, the script writer may be hitting its token budget and silently dropping content — check `_SEGMENT_MAX_TOKENS` and the token usage in the log.
 
 ### Script Writer failures (`podcast_script.json` missing or malformed)
 - This is the most fragile stage when using llama3.2:3b

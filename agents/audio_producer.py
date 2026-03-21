@@ -64,6 +64,11 @@ for _provider_key, _segments in _TTS_CFG.get("segment_routing", {}).items():
     for _seg in (_segments or []):
         _SEGMENT_ROUTING[_seg] = _provider_key  # "chatterbox" or "f5_tts"
 
+# If chatterbox/f5_tts have no assigned segments, disable them so they never load.
+# Set both to [] in tts_config.yaml to use gTTS only (fast, no model download).
+_CHATTERBOX_DISABLED: bool = not _TTS_CFG.get("segment_routing", {}).get("chatterbox")
+_F5TTS_DISABLED: bool = not _TTS_CFG.get("segment_routing", {}).get("f5_tts")
+
 
 # Ensure pydub can find ffmpeg on Windows after a winget install (PATH not refreshed yet)
 def _ensure_ffmpeg() -> None:
@@ -189,8 +194,9 @@ class F5TTSProvider:
 
         # Use F5-TTS bundled default reference (ships with the package)
         try:
-            import importlib.resources as pkg_resources
-            ref_dir = Path(str(pkg_resources.files("f5_tts"))) / "infer" / "examples" / "basic"
+            import f5_tts as _f5_pkg
+            # f5_tts is a namespace package (__file__ is None), use __path__ instead
+            ref_dir = Path(list(_f5_pkg.__path__)[0]) / "infer" / "examples" / "basic"
             ref_wav = str(ref_dir / "basic_ref_en.wav")
             ref_txt_path = ref_dir / "basic_ref_en.txt"
             ref_txt = ref_txt_path.read_text().strip() if ref_txt_path.exists() else (
@@ -354,8 +360,18 @@ class AudioProducerAgent:
         )
         log.info("tts_provider_selected", segment_type=segment_type, provider=designated)
 
-        if designated == "chatterbox":
+        if _CHATTERBOX_DISABLED and _F5TTS_DISABLED:
+            # Both local providers disabled — go straight to gTTS (fast, no model load)
+            log.info("tts_provider_selected", segment_type=segment_type, provider="gtts")
+            return self._synthesize_gtts(text)
+        elif designated == "chatterbox" and not _CHATTERBOX_DISABLED:
             primary_fn, fallback_fn = self._synthesize_chatterbox, self._synthesize_f5tts
+        elif _CHATTERBOX_DISABLED:
+            # Chatterbox disabled — use F5-TTS with gTTS fallback
+            primary_fn, fallback_fn = self._synthesize_f5tts, self._synthesize_gtts
+        elif _F5TTS_DISABLED:
+            # F5-TTS disabled — use Chatterbox with gTTS fallback
+            primary_fn, fallback_fn = self._synthesize_chatterbox, self._synthesize_gtts
         else:
             primary_fn, fallback_fn = self._synthesize_f5tts, self._synthesize_chatterbox
 

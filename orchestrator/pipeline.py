@@ -37,6 +37,7 @@ from agents.ingestion import IngestionAgent
 from agents.script_writer import ScriptWriterAgent
 from agents.summarizer import SummarizerAgent
 from models.article import ArticleSummary, CuratedArticle, RawArticle
+from models.enums import Priority
 from models.podcast import Episode, PodcastScript
 
 log = structlog.get_logger(__name__)
@@ -305,6 +306,53 @@ def _write_log(path: str, lines: list[str]) -> None:
     log.info("trace_written", path=path)
 
 
+# ── Coverage gap detection ─────────────────────────────────────────────────────
+
+def _find_coverage_gaps(script: PodcastScript, summaries: list[ArticleSummary]) -> dict:
+    """
+    Detect P0/P1 articles that were skipped or have thin coverage in the script.
+
+    "Skipped" = article title keywords not found anywhere in the narrated text.
+    "Undercovered" = P0 article whose summary contains rich structured sections
+      (CORE NEWS, SURROUNDING IMPACT, HOW IT WORKS, PM INTERVIEW EDGE) but may
+      not have been fully narrated — flagged for expansion pass.
+
+    Returns {"skipped": [...article_ids], "undercovered": [...article_ids]}
+    NOTE: source_article_ids on segments records what went IN to the LLM, not
+    what was actually narrated. This function uses content_plain text search instead.
+    """
+    all_plain_text = " ".join(s.content_plain.lower() for s in script.segments)
+
+    skipped: list[str] = []
+    undercovered: list[str] = []
+
+    for summary in summaries:
+        if summary.priority not in (Priority.P0, Priority.P1):
+            continue
+
+        # Check if meaningful title words appear anywhere in the narrated text
+        title_words = [w.lower() for w in summary.title.split() if len(w) > 4]
+        mentioned = any(w in all_plain_text for w in title_words[:3])
+
+        if not mentioned:
+            skipped.append(summary.article_id)
+        elif summary.priority == Priority.P0:
+            # P0 is mentioned but check if its rich summary content was narrated.
+            # A P0 summary has 6 sections; if ≥3 key sections are present in the
+            # summary text, there's rich material that should be narrated in depth.
+            sections_present = sum(
+                1 for marker in [
+                    "CORE NEWS", "SURROUNDING IMPACT", "HOW IT WORKS", "PM INTERVIEW EDGE"
+                ]
+                if marker in summary.summary_text.upper()
+            )
+            if sections_present >= 3:
+                # Rich summary available — flag for targeted expansion coverage check
+                undercovered.append(summary.article_id)
+
+    return {"skipped": skipped, "undercovered": undercovered}
+
+
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 class NewsFlowPipeline:
@@ -333,7 +381,7 @@ class NewsFlowPipeline:
             log.info("checkpoint_found", stage="ingestion")
             raw_articles = _load_json(raw_path, RawArticle)
         else:
-            raw_articles = IngestionAgent().run()
+            raw_articles = IngestionAgent().run(date=date)
             _save_json(raw_articles, raw_path)
             log.info("ingestion_complete", count=len(raw_articles))
 
@@ -377,25 +425,51 @@ class NewsFlowPipeline:
         else:
             script = ScriptWriterAgent().run(summaries, date)
 
-            # Check minimum duration — re-run in expansion_mode if below threshold.
-            # expansion_mode elaborates P1 articles to fill toward the 45-min target.
-            min_duration_min = self._min_duration_min()
-            if script.total_estimated_duration_min < min_duration_min:
-                log.warning(
-                    "script_below_min_duration",
-                    actual_min=script.total_estimated_duration_min,
-                    min_target=min_duration_min,
-                    action="re-running_in_expansion_mode",
-                )
-                script = ScriptWriterAgent().run(summaries, date, expansion_mode=True)
+        # Coverage gap detection — find P0/P1 articles skipped or undercovered.
+        # Runs whether script was freshly generated or loaded from checkpoint.
+        gaps = _find_coverage_gaps(script, summaries)
+        skipped_ids = gaps["skipped"]
+        undercovered_ids = gaps["undercovered"]
+        gap_ids = skipped_ids + undercovered_ids
 
+        if gap_ids:
+            log.info(
+                "coverage_gaps_detected",
+                skipped=len(skipped_ids),
+                undercovered=len(undercovered_ids),
+                gap_article_ids=gap_ids,
+                action="running_targeted_expansion",
+            )
+            pre_expansion_min = script.total_estimated_duration_min
+            script = ScriptWriterAgent().run(summaries, date, expansion_mode=True, coverage_gaps=gap_ids)
+            _save_json(script, script_path)
+            gain = script.total_estimated_duration_min - pre_expansion_min
+            if gain < 3:
+                log.info(
+                    "expansion_minimal_gain",
+                    before_min=pre_expansion_min,
+                    after_min=script.total_estimated_duration_min,
+                    gain_min=gain,
+                    note="all articles covered at appropriate depth — accepting current length",
+                )
+            else:
+                log.info(
+                    "script_expanded",
+                    segments=len(script.segments),
+                    duration_min=script.total_estimated_duration_min,
+                    gain_min=gain,
+                )
+            # Clear audio checkpoint so TTS re-runs against the expanded script.
+            if Path(metadata_path).exists():
+                os.remove(metadata_path)
+                log.info("audio_checkpoint_cleared", reason="script_expanded")
+        elif not script_from_checkpoint:
             _save_json(script, script_path)
             log.info(
                 "script_complete",
                 segments=len(script.segments),
                 duration_min=script.total_estimated_duration_min,
             )
-
             # Script was freshly generated — clear audio checkpoint so TTS re-runs
             # against the new script (not the stale MP3 from a previous run).
             if Path(metadata_path).exists():
@@ -420,16 +494,6 @@ class NewsFlowPipeline:
         log.info("pipeline_complete", date=date, episode_file=episode.file_path)
         return episode
 
-    def _min_duration_min(self) -> int:
-        """Read min_duration_min from preferences.yaml (default 45)."""
-        import yaml
-        prefs_path = os.path.join(os.path.dirname(__file__), "..", "config", "preferences.yaml")
-        try:
-            with open(prefs_path, "r") as f:
-                prefs = yaml.safe_load(f)
-            return int(prefs.get("time_budget", {}).get("min_duration_min", 45))
-        except Exception:
-            return 45
 
 
 def main():
