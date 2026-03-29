@@ -64,12 +64,6 @@ class TestHasFundingSignals:
     def test_dollar_amount_lowercase_m(self):
         assert CuratorAgent._has_funding_signals("Firm secures $100m in seed round", "") is True
 
-    def test_raises_keyword(self):
-        assert CuratorAgent._has_funding_signals("Company raises Series A", "") is True
-
-    def test_raise_keyword_singular(self):
-        assert CuratorAgent._has_funding_signals("Why startups raise late", "") is True
-
     def test_funding_keyword(self):
         assert CuratorAgent._has_funding_signals("New funding round announced", "") is True
 
@@ -130,6 +124,26 @@ class TestHasFundingSignals:
             "EU passes new AI regulation", "Compliance deadline set for 2027"
         ) is False
 
+    def test_raises_bar_is_false(self):
+        """'raises bar' is a common tech phrase — must NOT trigger the override."""
+        assert CuratorAgent._has_funding_signals(
+            "Benchmark raises bar for AI evals", ""
+        ) is False
+
+    def test_raises_concerns_is_false(self):
+        """'raises concerns' is a common phrase — must NOT trigger the override."""
+        assert CuratorAgent._has_funding_signals(
+            "OpenAI raises concerns about regulation", ""
+        ) is False
+
+    def test_raises_series_a_still_matches_via_funding_keyword(self):
+        """'Company raises Series A funding' still matches via 'funding' keyword."""
+        assert CuratorAgent._has_funding_signals("Company raises Series A funding", "") is True
+
+    def test_startup_raises_dollar_matches_via_dollar_pattern(self):
+        """'Startup raises $38M' still matches via the dollar amount pattern."""
+        assert CuratorAgent._has_funding_signals("Startup raises $38M", "") is True
+
 
 # ---------------------------------------------------------------------------
 # Override logic — via _classify_batch post-processing loop
@@ -138,18 +152,11 @@ class TestHasFundingSignals:
 
 def _run_override(articles: list[CuratedArticle]) -> list[CuratedArticle]:
     """
-    Replicate the post-classification funding override block from _classify_batch
-    using the actual CuratorAgent method and module-level regex.
-    We invoke it via a minimal CuratorAgent instance without touching the LLM.
+    Apply the funding override by calling _apply_funding_override directly.
+    Uses a minimal CuratorAgent instance (skips __init__) to avoid LLM/prefs loading.
     """
     agent = CuratorAgent.__new__(CuratorAgent)  # skip __init__
-    for ca in articles:
-        if (
-            ca.category != Category.FUNDING_MA
-            and ca.category != Category.INDIA_TECH
-            and agent._has_funding_signals(ca.title, ca.snippet or "")
-        ):
-            ca.category = Category.FUNDING_MA
+    agent._apply_funding_override(articles)
     return articles
 
 
@@ -232,3 +239,44 @@ class TestFundingOverrideLogic:
         assert result[1].category == Category.FUNDING_MA           # overridden
         assert result[2].category == Category.INDIA_TECH           # india_tech exception
         assert result[3].category == Category.FUNDING_MA           # overridden
+
+
+# ---------------------------------------------------------------------------
+# Fallback path: _apply_funding_override is called even for fallback articles
+# ---------------------------------------------------------------------------
+
+class TestFallbackPathOverride:
+    def test_apply_funding_override_direct_on_fallback_articles(self):
+        """
+        _apply_funding_override must work on articles that came from the fallback
+        path (i.e. were never through _classify_batch).  The override is now applied
+        once in _classify after all batches, including any fallback articles, so
+        calling _apply_funding_override directly on such a list should override them.
+        """
+        agent = CuratorAgent.__new__(CuratorAgent)  # skip __init__
+
+        # Simulate a fallback article: category=ENGINEERING_TECH, has funding keyword
+        fallback_article = _make_curated(
+            title="Startup funding round announced",
+            category=Category.ENGINEERING_TECH,
+        )
+        articles = [fallback_article]
+        agent._apply_funding_override(articles)
+        assert articles[0].category == Category.FUNDING_MA
+
+    def test_apply_funding_override_no_double_apply_for_normal_path(self):
+        """
+        Articles that would have gone through _classify_batch are now only overridden
+        once (in _classify). Calling _apply_funding_override on an already-overridden
+        article is idempotent — it stays funding_ma and does NOT log a second override.
+        """
+        agent = CuratorAgent.__new__(CuratorAgent)  # skip __init__
+
+        article = _make_curated(
+            title="Startup raises $50M Series B",
+            category=Category.FUNDING_MA,  # already overridden
+        )
+        articles = [article]
+        agent._apply_funding_override(articles)
+        # Still funding_ma, not double-processed
+        assert articles[0].category == Category.FUNDING_MA
