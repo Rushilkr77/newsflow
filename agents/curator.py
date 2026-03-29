@@ -41,6 +41,20 @@ _PREFS_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "preferenc
 # Model for classification (best small model for JSON output)
 _CURATOR_LOCAL_MODEL = os.getenv("CURATOR_LOCAL_MODEL")
 
+# Funding/M&A signal patterns — used for post-classification override
+_FUNDING_SIGNALS = re.compile(
+    r'\$\d+(?:\.\d+)?[MBmb]\b'  # $38M, $1.5B, $100m
+    r'|\braises?\b'               # raises, raise
+    r'|\bfunding\b'               # funding round
+    r'|\bacquir(?:es?|ed|ing)\b'  # acquires, acquired, acquiring
+    r'|\bacquisition\b'
+    r'|\bmerger\b'
+    r'|\b[Mm]&[Aa]\b'             # M&A
+    r'|\bIPO\b'
+    r'|\bvaluation\b',
+    re.IGNORECASE,
+)
+
 
 class CuratorAgent:
     def __init__(self):
@@ -270,6 +284,12 @@ class CuratorAgent:
             return True
         return False
 
+    @staticmethod
+    def _has_funding_signals(title: str, snippet: str) -> bool:
+        """Check whether a title or snippet contains clear funding/M&A signals."""
+        text = f"{title} {snippet[:200]}"
+        return bool(_FUNDING_SIGNALS.search(text))
+
     def _classify(self, deduped: list[dict]) -> list[CuratedArticle]:
         """Classify articles in batches of 8 using qwen2.5:3b."""
         results: list[CuratedArticle] = []
@@ -402,6 +422,24 @@ Return ONLY a JSON array (no markdown, no explanation):
                     context_only=is_context_only,
                 )
             )
+
+        # Post-classification funding override: articles with explicit funding/M&A signals
+        # that the LLM misrouted should become funding_ma. Exception: india_tech articles
+        # keep their category since india_tech is the user's higher-priority bucket for
+        # Indian funding stories (e.g. "Swish raises $38M" stays india_tech).
+        for ca in curated_articles:
+            if (
+                ca.category != Category.FUNDING_MA
+                and ca.category != Category.INDIA_TECH
+                and self._has_funding_signals(ca.title, ca.snippet or "")
+            ):
+                log.info(
+                    "funding_override",
+                    title=ca.title[:60],
+                    original_category=ca.category.value,
+                    new_category="funding_ma",
+                )
+                ca.category = Category.FUNDING_MA
 
         return curated_articles
 
