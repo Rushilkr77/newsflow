@@ -16,6 +16,7 @@ Usage:
 import os
 
 import structlog
+from openai import APIConnectionError, APIError, APITimeoutError
 
 log = structlog.get_logger(__name__)
 
@@ -87,12 +88,8 @@ def chat(
     if openrouter_model and OPENROUTER_API_KEY:
         try:
             return _chat_openrouter(openrouter_model, system, user, max_tokens)
-        except Exception as exc:
-            log.warning(
-                "openrouter_fallback",
-                model=openrouter_model,
-                error=str(exc),
-            )
+        except (APIError, APIConnectionError, APITimeoutError) as exc:
+            log.warning("openrouter_fallback", model=openrouter_model, error=str(exc))
             # Fall through to local/Anthropic path
 
     if _USE_LOCAL:
@@ -144,4 +141,6 @@ def _chat_openrouter(model: str, system: str, user: str, max_tokens: int) -> str
         input_tokens=usage.prompt_tokens if usage else None,
         output_tokens=usage.completion_tokens if usage else None,
     )
+    if not response.choices:
+        raise ValueError(f"OpenRouter returned empty choices for model {model}")
     return response.choices[0].message.content.strip()

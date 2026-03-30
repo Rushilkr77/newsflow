@@ -194,7 +194,7 @@ No bullet points. Short sentences. Written to be spoken aloud."""
     def _validate_p0_summary(
         self, article: CuratedArticle, content: str, summary_text: str
     ) -> str:
-        """Validate P0 summary quality; retry once if below threshold."""
+        """Validate P0 summary quality; retries once via OpenRouter if below threshold. Retry result is accepted unconditionally."""
         word_count = len(summary_text.split())
         headers = sum(
             1
@@ -217,7 +217,7 @@ No bullet points. Short sentences. Written to be spoken aloud."""
             word_count=word_count,
             headers=headers,
         )
-        retry_prompt = f"""Your previous summary was too short ({word_count} words) and only had {headers}/6 required sections.
+        retry_prompt = f"""Your previous summary was too short ({word_count} words, target: 400-500) and only had {headers}/6 required sections.
 
 Article: {article.title}
 Full Text: {content[:6000]}

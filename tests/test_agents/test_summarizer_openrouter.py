@@ -9,7 +9,15 @@ import sys
 import types
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
+from openai import APIError
+
+
+def _api_error(message: str) -> APIError:
+    """Build a minimal APIError instance for use as a mock side_effect."""
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    return APIError(message, request, body=None)
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +96,10 @@ class TestLlmClientOpenRouter:
         mock_ant.assert_not_called()
 
     def test_chat_falls_back_to_anthropic_on_openrouter_error(self):
-        """If _chat_openrouter raises, chat() falls through to Anthropic."""
+        """If _chat_openrouter raises an OpenAI APIError, chat() falls through to Anthropic."""
         with patch("utils.llm_client._USE_LOCAL", False), \
              patch("utils.llm_client.OPENROUTER_API_KEY", "sk-or-test-key"), \
-             patch("utils.llm_client._chat_openrouter", side_effect=RuntimeError("rate limit")), \
+             patch("utils.llm_client._chat_openrouter", side_effect=_api_error("rate limit")), \
              patch("utils.llm_client._chat_anthropic", return_value="anthropic result") as mock_ant:
             from utils.llm_client import chat
             result = chat(
@@ -102,10 +110,10 @@ class TestLlmClientOpenRouter:
         mock_ant.assert_called_once()
 
     def test_chat_falls_back_to_local_on_openrouter_error(self):
-        """If _chat_openrouter raises and _USE_LOCAL=True, falls through to Ollama."""
+        """If _chat_openrouter raises an OpenAI APIError and _USE_LOCAL=True, falls through to Ollama."""
         with patch("utils.llm_client._USE_LOCAL", True), \
              patch("utils.llm_client.OPENROUTER_API_KEY", "sk-or-test-key"), \
-             patch("utils.llm_client._chat_openrouter", side_effect=RuntimeError("timeout")), \
+             patch("utils.llm_client._chat_openrouter", side_effect=_api_error("timeout")), \
              patch("utils.llm_client._chat_ollama", return_value="local fallback") as mock_local:
             from utils.llm_client import chat
             result = chat(
