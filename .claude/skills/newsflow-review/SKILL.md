@@ -113,9 +113,12 @@ SSML present: ✓
 
 ### Expansion / Coverage
 Expansion triggered: yes
-Trigger reason: gap-driven (2 articles uncovered)
-coverage_gaps_detected: "OpenAI launches o3", "Anthropic raises $2B"
-expansion_minimal_gain: no
+Trigger reason: gap-driven (2 articles uncovered) / duration-driven / not triggered
+Duration gain: 45 min → 67 min (+22 min)
+Gaps before: 2 | Gaps after: 0
+Gaps filled: article_abc ✓, article_xyz ✓
+Gaps remaining: none ✓
+Segment deltas: ai_updates +180s, quick_hits +90s, funding_ma unchanged ✗
 
 ### Issues Found
 1. harper_carroll: 0 articles (is today Wed/Thu? if yes, investigate parser)
@@ -124,29 +127,48 @@ expansion_minimal_gain: no
 ### Overall: PASS / NEEDS ATTENTION / FAIL
 ```
 
-## Step 5b — Expansion and coverage gap report
+## Step 5b — Expansion quality report
 
-Read `workspace/{date}/pipeline.log` (or the console log if available) and search for these events:
+Check for `workspace/{date}/logs/expansion_diff.json`.
 
-**`coverage_gaps_detected`** — reports articles the script writer skipped or undercovered.
-- Extract: how many articles had gaps, and which titles/IDs were affected
-- If present: report as a content quality issue — those stories were not narrated
+**If the file does not exist**: expansion was not triggered (episode met duration target on first pass). Report: `Expansion: not triggered`.
 
-**`expansion_minimal_gain`** — logged when the pipeline ran an expansion pass but the episode was already covering all articles (duration short but coverage complete).
-- If present: this is a **quality win**, not a problem. Report it as such.
+**If the file exists**, read it. Its structure is:
 
-**Expansion trigger reason** — determine what drove the expansion pass:
-- **Gap-driven**: `coverage_gaps_detected` was logged before expansion → specific articles were missing from narration
-- **Duration-driven**: episode was under 45 min but no gaps detected → expansion added depth, not missing articles
-
-Report format addition to Step 6:
+```json
+{
+  "pre_expansion":  { "duration_min": N, "segments": { "segment_type": { "duration_sec": N, "article_ids": [...], "char_count": N }, ... }, "gaps": { "article_id": true, ... } },
+  "post_expansion": { "duration_min": N, "segments": { ... }, "gaps": { ... } },
+  "summary": {
+    "gaps_before": N,
+    "gaps_after": N,
+    "gaps_filled": ["article_id_1", ...],
+    "gaps_remaining": ["article_id_2", ...],
+    "duration_gain_min": N
+  }
+}
 ```
-### Expansion / Coverage
-Expansion triggered: yes/no
-Trigger reason: gap-driven (N articles uncovered) / duration-driven / none
-coverage_gaps_detected: "{title1}", "{title2}" [or "none"]
-expansion_minimal_gain: yes (all articles covered, episode short) / no
-```
+
+Report all of these:
+
+1. **Duration gain**: `pre_expansion.duration_min` → `post_expansion.duration_min` (+`summary.duration_gain_min` min)
+2. **Gap resolution**:
+   - `summary.gaps_before` gaps before expansion → `summary.gaps_after` gaps after
+   - `gaps_filled`: list article IDs that are now narrated (✓ covered by expansion)
+   - `gaps_remaining`: list article IDs still uncovered — **FLAG each one** as a content gap that survived expansion
+3. **Per-segment duration delta**: for each segment present in both pre and post snapshots, compute:
+   - `post_expansion.segments[seg].duration_sec - pre_expansion.segments[seg].duration_sec`
+   - Report as `+Ns` gain or `unchanged`
+   - Flag any segment with zero delta (expansion added no content to it)
+4. **Expansion quality verdict**:
+   - `gaps_remaining == 0` → ✓ all articles covered after expansion
+   - `gaps_remaining > 0` → ✗ ISSUE: expansion did not cover all articles; list the IDs and look up their titles in `curated_articles.json`
+
+**Note on `gaps_remaining`**: These are articles whose titles weren't found verbatim in `content_plain` after expansion. Can be a false positive when the script paraphrases (e.g. "OpenAI's latest model" vs "OpenAI launches GPT-5"). Cross-reference against `curated_articles.json` titles to judge severity before flagging.
+
+**Expansion trigger reason** — determine from `summary.gaps_before`:
+- **Gap-driven**: `gaps_before > 0` → specific articles were missing from narration before expansion
+- **Duration-driven**: `gaps_before == 0` but expansion ran → episode was short, added depth to existing coverage
 
 ## Quick Dedup Check (bonus)
 
