@@ -441,8 +441,64 @@ class NewsFlowPipeline:
                 action="running_targeted_expansion",
             )
             pre_expansion_min = script.total_estimated_duration_min
+            pre_expansion_segments = {
+                seg.segment_type: {
+                    "duration_sec": seg.duration_estimate_sec,
+                    "article_ids": seg.source_article_ids,
+                    "char_count": len(seg.content_plain),
+                }
+                for seg in script.segments
+            }
             script = ScriptWriterAgent().run(summaries, date, expansion_mode=True, coverage_gaps=gap_ids)
             _save_json(script, script_path)
+
+            # Post-expansion gap re-check and diff logging
+            post_gaps = _find_coverage_gaps(script, summaries)
+            gaps_before = set(gap_ids)
+            gaps_after = set(post_gaps["skipped"] + post_gaps["undercovered"])
+            gaps_filled = sorted(gaps_before - gaps_after)
+            gaps_remaining = sorted(gaps_after)
+
+            post_expansion_segments = {
+                seg.segment_type: {
+                    "duration_sec": seg.duration_estimate_sec,
+                    "article_ids": seg.source_article_ids,
+                    "char_count": len(seg.content_plain),
+                }
+                for seg in script.segments
+            }
+
+            expansion_diff = {
+                "pre_expansion": {
+                    "duration_min": pre_expansion_min,
+                    "segments": pre_expansion_segments,
+                    "gaps": {"skipped": skipped_ids, "undercovered": undercovered_ids},
+                },
+                "post_expansion": {
+                    "duration_min": script.total_estimated_duration_min,
+                    "segments": post_expansion_segments,
+                    "gaps": post_gaps,
+                },
+                "summary": {
+                    "gaps_before": len(gaps_before),
+                    "gaps_after": len(gaps_after),
+                    "gaps_filled": gaps_filled,
+                    "gaps_remaining": gaps_remaining,
+                    "duration_gain_min": script.total_estimated_duration_min - pre_expansion_min,
+                },
+            }
+            diff_path = os.path.join(logs_dir, "expansion_diff.json")
+            with open(diff_path, "w", encoding="utf-8") as f:
+                json.dump(expansion_diff, f, indent=2, default=str)
+
+            log.info(
+                "expansion_coverage_result",
+                gaps_before=len(gaps_before),
+                gaps_after=len(gaps_after),
+                gaps_filled=gaps_filled,
+                gaps_remaining=gaps_remaining,
+            )
+
             gain = script.total_estimated_duration_min - pre_expansion_min
             if gain < 3:
                 log.info(
