@@ -353,6 +353,58 @@ def _find_coverage_gaps(script: PodcastScript, summaries: list[ArticleSummary]) 
     return {"skipped": skipped, "undercovered": undercovered}
 
 
+# ── Expansion diff helper ──────────────────────────────────────────────────────
+
+def _build_expansion_diff(
+    pre_min: int,
+    pre_segments: dict,
+    pre_gaps: dict,
+    post_script: PodcastScript,
+    post_gaps: dict,
+    gap_ids: list[str],
+) -> dict:
+    """Build the expansion diff dict comparing pre/post expansion state.
+
+    Note: articles in the 'undercovered' bucket of post_gaps will structurally
+    remain flagged after expansion because _find_coverage_gaps checks summary_text
+    section markers (which are never mutated). A non-zero gaps_remaining for
+    undercovered articles does not necessarily mean they were not narrated.
+    """
+    gaps_before = set(gap_ids)
+    post_all_gap_ids = set(post_gaps["skipped"] + post_gaps["undercovered"])
+    gaps_filled = sorted(gaps_before - post_all_gap_ids)
+    gaps_remaining = sorted(post_all_gap_ids)
+
+    post_segments = {
+        seg.segment_type: {
+            "duration_sec": seg.duration_estimate_sec,
+            "article_ids": seg.source_article_ids,
+            "char_count": len(seg.content_plain),
+        }
+        for seg in post_script.segments
+    }
+
+    return {
+        "pre_expansion": {
+            "duration_min": pre_min,
+            "segments": pre_segments,
+            "gaps": pre_gaps,
+        },
+        "post_expansion": {
+            "duration_min": post_script.total_estimated_duration_min,
+            "segments": post_segments,
+            "gaps": post_gaps,
+        },
+        "summary": {
+            "gaps_before": len(gaps_before),
+            "gaps_after": len(post_all_gap_ids),
+            "gaps_filled": gaps_filled,
+            "gaps_remaining": gaps_remaining,
+            "duration_gain_min": post_script.total_estimated_duration_min - pre_min,
+        },
+    }
+
+
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 class NewsFlowPipeline:
@@ -454,52 +506,28 @@ class NewsFlowPipeline:
 
             # Post-expansion gap re-check and diff logging
             post_gaps = _find_coverage_gaps(script, summaries)
-            gaps_before = set(gap_ids)
-            gaps_after = set(post_gaps["skipped"] + post_gaps["undercovered"])
-            gaps_filled = sorted(gaps_before - gaps_after)
-            gaps_remaining = sorted(gaps_after)
-
-            post_expansion_segments = {
-                seg.segment_type: {
-                    "duration_sec": seg.duration_estimate_sec,
-                    "article_ids": seg.source_article_ids,
-                    "char_count": len(seg.content_plain),
-                }
-                for seg in script.segments
-            }
-
-            expansion_diff = {
-                "pre_expansion": {
-                    "duration_min": pre_expansion_min,
-                    "segments": pre_expansion_segments,
-                    "gaps": {"skipped": skipped_ids, "undercovered": undercovered_ids},
-                },
-                "post_expansion": {
-                    "duration_min": script.total_estimated_duration_min,
-                    "segments": post_expansion_segments,
-                    "gaps": post_gaps,
-                },
-                "summary": {
-                    "gaps_before": len(gaps_before),
-                    "gaps_after": len(gaps_after),
-                    "gaps_filled": gaps_filled,
-                    "gaps_remaining": gaps_remaining,
-                    "duration_gain_min": script.total_estimated_duration_min - pre_expansion_min,
-                },
-            }
+            gain = script.total_estimated_duration_min - pre_expansion_min
+            expansion_diff = _build_expansion_diff(
+                pre_min=pre_expansion_min,
+                pre_segments=pre_expansion_segments,
+                pre_gaps={"skipped": skipped_ids, "undercovered": undercovered_ids},
+                post_script=script,
+                post_gaps=post_gaps,
+                gap_ids=gap_ids,
+            )
             diff_path = os.path.join(logs_dir, "expansion_diff.json")
             with open(diff_path, "w", encoding="utf-8") as f:
                 json.dump(expansion_diff, f, indent=2, default=str)
 
+            gaps_filled = expansion_diff["summary"]["gaps_filled"]
+            gaps_remaining = expansion_diff["summary"]["gaps_remaining"]
             log.info(
                 "expansion_coverage_result",
-                gaps_before=len(gaps_before),
-                gaps_after=len(gaps_after),
+                gaps_before=expansion_diff["summary"]["gaps_before"],
+                gaps_after=expansion_diff["summary"]["gaps_after"],
                 gaps_filled=gaps_filled,
                 gaps_remaining=gaps_remaining,
             )
-
-            gain = script.total_estimated_duration_min - pre_expansion_min
             if gain < 3:
                 log.info(
                     "expansion_minimal_gain",
