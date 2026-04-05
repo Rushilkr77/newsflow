@@ -29,6 +29,12 @@ log = structlog.get_logger(__name__)
 # Model for summarization (7B for better structured output quality)
 _SUMMARIZER_LOCAL_MODEL = os.getenv("SUMMARIZER_LOCAL_MODEL")
 
+# OpenRouter model for P0/P1 summarization (higher quality)
+_OPENROUTER_SUMMARIZER_MODEL = os.getenv(
+    "OPENROUTER_SUMMARIZER_MODEL",
+    "meta-llama/llama-3.3-70b-instruct:free",
+)
+
 # Sources whose articles are typically behind the ET paywall
 _ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
 
@@ -66,11 +72,8 @@ class SummarizerAgent:
     # -------------------------------------------------------------------------
 
     def _fetch_full_text(self, articles: list[CuratedArticle]) -> None:
-        """Fetch full article text for P0 and P1 articles in-place."""
-        to_fetch = [
-            a for a in articles
-            if a.priority in (Priority.P0, Priority.P1) and not a.full_text
-        ]
+        """Fetch full article text for all articles in-place."""
+        to_fetch = [a for a in articles if not a.full_text]
         log.info("fetching_articles", count=len(to_fetch))
 
         for article in to_fetch:
@@ -119,10 +122,11 @@ class SummarizerAgent:
 
         if article.priority == Priority.P0:
             summary_text = self._summarize_p0(article, content)
+            summary_text = self._validate_p0_summary(article, content, summary_text)
         elif article.priority == Priority.P1:
             summary_text = self._summarize_p1(article, content)
         else:
-            summary_text = self._summarize_p2(article)
+            summary_text = self._summarize_p2(article, content)
 
         word_count = len(summary_text.split())
         key_takeaways = self._extract_key_takeaways(summary_text)
@@ -143,7 +147,7 @@ class SummarizerAgent:
     def _summarize_p0(self, article: CuratedArticle, content: str) -> str:
         prompt = f"""Article: {article.title}
 Source: {article.source.value}
-Full Text: {content[:4000]}
+Full Text: {content[:6000]}
 
 Write a 400-500 word summary using EXACTLY this structure — label each section:
 1. CORE NEWS: What exactly happened — one clear sentence.
@@ -159,7 +163,7 @@ Rules:
 - Write for ears, not eyes — no bullet points in output
 - Stay within 400-500 words strictly"""
 
-        return self._call_llm(prompt, max_tokens=2048)
+        return self._call_llm(prompt, max_tokens=2048, use_openrouter=True)
 
     def _summarize_p1(self, article: CuratedArticle, content: str) -> str:
         prompt = f"""Article: {article.title}
@@ -173,11 +177,11 @@ Write a 150-200 word summary using EXACTLY this structure — label each section
 
 Stay within word count strictly. No bullet points. Short sentences."""
 
-        return self._call_llm(prompt, max_tokens=1536)
+        return self._call_llm(prompt, max_tokens=1536, use_openrouter=True)
 
-    def _summarize_p2(self, article: CuratedArticle) -> str:
+    def _summarize_p2(self, article: CuratedArticle, content: str) -> str:
         prompt = f"""Article: {article.title}
-Snippet: {article.snippet[:500]}
+Snippet: {content[:500]}
 
 Write a 60-80 word summary using EXACTLY this structure — label each section:
 1. CORE NEWS: What happened — one clear sentence.
@@ -187,7 +191,49 @@ No bullet points. Short sentences. Written to be spoken aloud."""
 
         return self._call_llm(prompt, max_tokens=768)
 
-    def _call_llm(self, prompt: str, max_tokens: int = 1024) -> str:
+    def _validate_p0_summary(
+        self, article: CuratedArticle, content: str, summary_text: str
+    ) -> str:
+        """Validate P0 summary quality; retries once via OpenRouter if below threshold. Retry result is accepted unconditionally."""
+        word_count = len(summary_text.split())
+        headers = sum(
+            1
+            for marker in [
+                "CORE NEWS",
+                "SURROUNDING IMPACT",
+                "COMPETITOR CONTEXT",
+                "LAUNCH RATIONALE",
+                "HOW IT WORKS",
+                "PM INTERVIEW EDGE",
+            ]
+            if marker in summary_text.upper()
+        )
+        if word_count >= 300 and headers >= 4:
+            return summary_text  # passes
+
+        log.info(
+            "p0_summary_retry",
+            title=article.title[:60],
+            word_count=word_count,
+            headers=headers,
+        )
+        retry_prompt = f"""Your previous summary was too short ({word_count} words, target: 400-500) and only had {headers}/6 required sections.
+
+Article: {article.title}
+Full Text: {content[:6000]}
+
+You MUST write a 400-500 word summary with ALL SIX sections labeled exactly:
+1. CORE NEWS  2. SURROUNDING IMPACT  3. COMPETITOR CONTEXT
+4. LAUNCH RATIONALE  5. HOW IT WORKS  6. PM INTERVIEW EDGE
+
+If COMPETITOR CONTEXT doesn't apply, write "Not directly applicable" and move on.
+Each section needs 2-3 sentences. Stay within 400-500 words total."""
+
+        return self._call_llm(retry_prompt, max_tokens=2048, use_openrouter=True)
+
+    def _call_llm(
+        self, prompt: str, max_tokens: int = 1024, use_openrouter: bool = False
+    ) -> str:
         return chat(
             model_hint="claude-haiku-4-5",
             system=(
@@ -199,6 +245,7 @@ No bullet points. Short sentences. Written to be spoken aloud."""
             user=prompt,
             max_tokens=max_tokens,
             local_model_override=_SUMMARIZER_LOCAL_MODEL,
+            openrouter_model=_OPENROUTER_SUMMARIZER_MODEL if use_openrouter else None,
         )
 
     # -------------------------------------------------------------------------

@@ -41,6 +41,19 @@ _PREFS_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "preferenc
 # Model for classification (best small model for JSON output)
 _CURATOR_LOCAL_MODEL = os.getenv("CURATOR_LOCAL_MODEL")
 
+# Funding/M&A signal patterns — used for post-classification override
+_FUNDING_SIGNALS = re.compile(
+    r'\$\d+(?:\.\d+)?[MBmb]\b'  # $38M, $1.5B, $100m
+    r'|\bfunding\b'               # funding round
+    r'|\bacquir(?:es?|ed|ing)\b'  # acquires, acquired, acquiring
+    r'|\bacquisition\b'
+    r'|\bmerger\b'
+    r'|\bM&A\b'                   # re.IGNORECASE handles all case variants
+    r'|\bIPO\b'
+    r'|\bvaluation\b',
+    re.IGNORECASE,
+)
+
 
 class CuratorAgent:
     def __init__(self):
@@ -270,6 +283,33 @@ class CuratorAgent:
             return True
         return False
 
+    @staticmethod
+    def _has_funding_signals(title: str, snippet: str) -> bool:
+        """Check whether a title or snippet contains clear funding/M&A signals."""
+        text = f"{title} {snippet[:200]}"
+        return bool(_FUNDING_SIGNALS.search(text))
+
+    def _apply_funding_override(self, articles: list[CuratedArticle]) -> None:
+        """
+        Post-classification funding override (in-place).
+        Articles with explicit funding/M&A signals that the LLM misrouted are
+        reassigned to funding_ma. Exception: india_tech keeps its category since
+        that is the higher-priority bucket for Indian funding stories.
+        """
+        for ca in articles:
+            if (
+                ca.category != Category.FUNDING_MA
+                and ca.category != Category.INDIA_TECH
+                and self._has_funding_signals(ca.title, ca.snippet or "")
+            ):
+                log.info(
+                    "funding_override",
+                    title=ca.title[:60],
+                    original_category=ca.category.value,
+                    new_category="funding_ma",
+                )
+                ca.category = Category.FUNDING_MA
+
     def _classify(self, deduped: list[dict]) -> list[CuratedArticle]:
         """Classify articles in batches of 8 using qwen2.5:3b."""
         results: list[CuratedArticle] = []
@@ -301,6 +341,7 @@ class CuratorAgent:
                 for item in batch:
                     results.append(self._fallback_curated(item))
 
+        self._apply_funding_override(results)
         return results
 
     def _classify_batch(self, batch: list[dict]) -> list[CuratedArticle]:
