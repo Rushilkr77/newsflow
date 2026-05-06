@@ -6,7 +6,10 @@
       "Bash(python -c \":*)",
       "Bash(powershell -Command \"Get-PSDrive C | Select-Object Used,Free\")",
       "Bash(du -sh ~/.cache/huggingface/hub/models--*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(ollama list:*)",
+      "WebFetch(domain:costgoat.com)",
+      "WebFetch(domain:openrouter.ai)"
     ]
   }
 }

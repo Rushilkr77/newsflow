@@ -289,15 +289,30 @@ class CuratorAgent:
         text = f"{title} {snippet[:200]}"
         return bool(_FUNDING_SIGNALS.search(text))
 
+    # ET sources always belong in india_tech regardless of LLM classification
+    _INDIA_SOURCES: frozenset[Source] = frozenset({Source.ETTECH, Source.ET_AI})
+
     def _apply_funding_override(self, articles: list[CuratedArticle]) -> None:
         """
-        Post-classification funding override (in-place).
-        Articles with explicit funding/M&A signals that the LLM misrouted are
-        reassigned to funding_ma. Exception: india_tech keeps its category since
-        that is the higher-priority bucket for Indian funding stories.
+        Post-classification funding/india routing override (in-place).
+
+        Two rules applied in one pass:
+        1. ET sources (ettech, et_ai) → always india_tech. The LLM often
+           misroutes Indian company funding rounds to funding_ma or
+           industry_strategy; source is a stronger signal than content.
+        2. Non-ET articles with explicit funding/M&A signals → funding_ma,
+           unless already correctly classified as india_tech or funding_ma.
         """
         for ca in articles:
-            if (
+            if ca.source in self._INDIA_SOURCES:
+                if ca.category != Category.INDIA_TECH:
+                    log.info(
+                        "india_source_override",
+                        title=ca.title[:60],
+                        original_category=ca.category.value,
+                    )
+                    ca.category = Category.INDIA_TECH
+            elif (
                 ca.category != Category.FUNDING_MA
                 and ca.category != Category.INDIA_TECH
                 and self._has_funding_signals(ca.title, ca.snippet or "")
@@ -311,7 +326,12 @@ class CuratorAgent:
                 ca.category = Category.FUNDING_MA
 
     def _classify(self, deduped: list[dict]) -> list[CuratedArticle]:
-        """Classify articles in batches of 8 using qwen2.5:3b."""
+        """Classify articles in batches of 8 using qwen2.5:3b.
+
+        On JSON parse failure, retries with progressively smaller batches (4→2→1)
+        before falling back. This prevents an entire batch of TLDR AI or ET articles
+        from being silently dropped due to one malformed LLM response.
+        """
         results: list[CuratedArticle] = []
         batch_size = 8
 
@@ -333,16 +353,43 @@ class CuratorAgent:
 
         for i in range(0, len(to_classify), batch_size):
             batch = to_classify[i : i + batch_size]
-            try:
-                classified = self._classify_batch(batch)
-                results.extend(classified)
-            except Exception as e:
-                log.error("classification_batch_failed", batch_start=i, error=str(e))
-                for item in batch:
-                    results.append(self._fallback_curated(item))
+            results.extend(self._classify_with_retry(batch, batch_start=i))
 
         self._apply_funding_override(results)
         return results
+
+    def _classify_with_retry(self, batch: list[dict], batch_start: int) -> list[CuratedArticle]:
+        """Try classifying a batch; on failure split in half and retry recursively.
+
+        Retry schedule: 8 → 4 → 2 → 1 → fallback per article.
+        This ensures every article gets at least one solo attempt before being
+        assigned the generic fallback classification.
+        """
+        try:
+            return self._classify_batch(batch)
+        except Exception as e:
+            if len(batch) == 1:
+                # Single article still failed — use source-aware fallback
+                log.warning(
+                    "classification_single_failed",
+                    batch_start=batch_start,
+                    title=batch[0]["article"].title[:60],
+                    error=str(e),
+                )
+                return [self._fallback_curated(batch[0])]
+
+            # Split and retry each half
+            log.warning(
+                "classification_batch_failed",
+                batch_start=batch_start,
+                batch_size=len(batch),
+                error=str(e),
+                action=f"retrying_as_{len(batch)//2}+{len(batch)-len(batch)//2}",
+            )
+            mid = len(batch) // 2
+            left = self._classify_with_retry(batch[:mid], batch_start=batch_start)
+            right = self._classify_with_retry(batch[mid:], batch_start=batch_start + mid)
+            return left + right
 
     def _classify_batch(self, batch: list[dict]) -> list[CuratedArticle]:
         articles_for_prompt = []
@@ -389,7 +436,11 @@ Return ONLY a JSON array (no markdown, no explanation):
         if raw_json.startswith("```"):
             raw_json = raw_json.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-        classifications = json.loads(raw_json)
+        # Try to parse; if it fails attempt lightweight JSON repair before raising
+        try:
+            classifications = json.loads(raw_json)
+        except json.JSONDecodeError:
+            classifications = json.loads(self._repair_json(raw_json))
 
         curated_articles = []
         for item_data in classifications:
@@ -417,7 +468,7 @@ Return ONLY a JSON array (no markdown, no explanation):
                 )
                 priority = Priority.P1
 
-            relevance_score = float(item_data.get("relevance_score", 50))
+            relevance_score = float(item_data.get("relevance_score") or 50)
             if is_context_only:
                 relevance_score = max(0.0, relevance_score - 15)
             # Boost ET sources to counteract empty-snippet classification uncertainty
@@ -436,7 +487,7 @@ Return ONLY a JSON array (no markdown, no explanation):
                     category=category,
                     dedup_group_id=item.get("dedup_group_id"),
                     estimated_podcast_duration_sec=int(
-                        item_data.get("estimated_podcast_seconds", 120)
+                        item_data.get("estimated_podcast_seconds") or 120
                     ),
                     snippet=a.snippet,
                     discussion_hooks=item_data.get("discussion_hooks", []),
@@ -500,8 +551,26 @@ strategic moves (acquisitions, exec poaching) are P0 — not P1 or P2."""
 
         return prompt
 
+    # Mandatory sources that should always survive the time budget even on fallback
+    _MANDATORY_SOURCES = frozenset({
+        Source.TLDR_AI, Source.ET_AI, Source.ETTECH,
+    })
+
     def _fallback_curated(self, item: dict) -> CuratedArticle:
+        """Fallback when LLM classification fails even for a single article.
+
+        Mandatory sources (tldr_ai, et_ai, ettech) get score=65 so they survive
+        time budget cuts over random P2 articles with score=40-50.
+        """
         a = item["article"]
+        is_mandatory = a.source in self._MANDATORY_SOURCES
+        score = 65.0 if is_mandatory else 40.0
+        log.debug(
+            "classification_fallback",
+            source=a.source.value,
+            title=a.title[:60],
+            score=score,
+        )
         return CuratedArticle(
             id=a.id,
             title=a.title,
@@ -509,12 +578,31 @@ strategic moves (acquisitions, exec poaching) are P0 — not P1 or P2."""
             source=a.source,
             all_sources=item["all_sources"],
             priority=Priority.P2,
-            relevance_score=40.0,
-            category=Category.ENGINEERING_TECH,
+            relevance_score=score,
+            category=Category.AI_PRODUCTS_TOOLS if is_mandatory else Category.ENGINEERING_TECH,
             dedup_group_id=item.get("dedup_group_id"),
             estimated_podcast_duration_sec=60,
             snippet=a.snippet,
         )
+
+    @staticmethod
+    def _repair_json(raw: str) -> str:
+        """Lightweight JSON repair for common qwen2.5:3b output errors.
+
+        Handles:
+        1. Missing commas between object fields (Expecting ',' delimiter)
+        2. Trailing commas before ] or }
+        3. Unquoted None/null values for numeric fields
+        """
+        # Replace Python None with JSON null
+        repaired = re.sub(r':\s*None\b', ': null', raw)
+        # Fix missing comma between } and { in arrays (e.g. }\n  {)
+        repaired = re.sub(r'}\s*\n(\s*{)', r'},\n\1', repaired)
+        # Fix missing comma between a closing quote/number and the next key
+        repaired = re.sub(r'("|\d)\s*\n(\s*")', r'\1,\n\2', repaired)
+        # Remove trailing commas before ] or }
+        repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+        return repaired
 
     # -------------------------------------------------------------------------
     # Time Budget Enforcement

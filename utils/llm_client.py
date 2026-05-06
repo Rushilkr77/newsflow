@@ -65,7 +65,7 @@ def chat(
     user: str,
     max_tokens: int = 2048,
     local_model_override: str | None = None,
-    openrouter_model: str | None = None,
+    openrouter_models: list[str] | None = None,
 ) -> str:
     """
     Send a single system+user prompt, return the response text.
@@ -80,17 +80,20 @@ def chat(
                               Used by agents to select per-task models (e.g. qwen2.5:3b
                               for classification, llama3.2:3b for script writing).
                               Only applies when USE_LOCAL_LLM=true.
-        openrouter_model: If set AND OPENROUTER_API_KEY is present, route this call
-                          through OpenRouter using the specified model. Falls back to
-                          local/Anthropic path if the OpenRouter call fails.
+        openrouter_models: Ordered list of OpenRouter model IDs to try in sequence.
+                           Requires OPENROUTER_API_KEY to be set. Each model is tried
+                           in order; on provider error the next model is attempted.
+                           Falls back to local/Anthropic only when all models fail.
     """
-    # OpenRouter path: takes priority over local/Anthropic when explicitly requested
-    if openrouter_model and OPENROUTER_API_KEY:
-        try:
-            return _chat_openrouter(openrouter_model, system, user, max_tokens)
-        except (APIError, APIConnectionError, APITimeoutError) as exc:
-            log.warning("openrouter_fallback", model=openrouter_model, error=str(exc))
-            # Fall through to local/Anthropic path
+    # OpenRouter path: try each model in sequence before falling back
+    if openrouter_models and OPENROUTER_API_KEY:
+        for model in openrouter_models:
+            try:
+                return _chat_openrouter(model, system, user, max_tokens)
+            except (APIError, APIConnectionError, APITimeoutError) as exc:
+                log.warning("openrouter_model_failed", model=model, error=str(exc))
+        log.warning("openrouter_all_failed", models=openrouter_models)
+        # Fall through to local/Anthropic path
 
     if _USE_LOCAL:
         return _chat_ollama(system, user, max_tokens, model=local_model_override)

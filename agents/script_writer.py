@@ -27,6 +27,17 @@ log = structlog.get_logger(__name__)
 # lower hallucination rate than llama3.2:3b for grounded narration.
 _SCRIPT_LOCAL_MODEL = os.getenv("SCRIPT_LOCAL_MODEL", "qwen2.5:7b")
 
+# OpenRouter model chain for script writing — tried in order, falls back to local on error.
+# Override via comma-separated env var OPENROUTER_SCRIPT_MODELS.
+_OPENROUTER_SCRIPT_MODELS: list[str] = [
+    m.strip()
+    for m in os.getenv(
+        "OPENROUTER_SCRIPT_MODELS",
+        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free",
+    ).split(",")
+    if m.strip()
+]
+
 # Max retries on JSON parse failure or empty content (llama3.2:3b is stochastic)
 _MAX_RETRIES = 4
 
@@ -410,6 +421,7 @@ Articles:
                     user=user_prompt,
                     max_tokens=max_tokens,
                     local_model_override=_SCRIPT_LOCAL_MODEL,
+                    openrouter_models=_OPENROUTER_SCRIPT_MODELS,
                 )
                 text = text.strip()
                 # qwen2.5:7b sometimes wraps in markdown fences (```json ... ```) or
@@ -472,6 +484,7 @@ Articles:
                     user=user_prompt,
                     max_tokens=max_tokens,
                     local_model_override=_SCRIPT_LOCAL_MODEL,
+                    openrouter_models=_OPENROUTER_SCRIPT_MODELS,
                 )
 
                 raw = self._strip_fences(raw)
@@ -699,7 +712,12 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                 # Case 1: direct string value
                 if isinstance(v, str) and len(v) > 20:
                     return v
-                # Case 2: list of dicts — extract the longest string field per item
+                # Case 2a: list of strings — join them
+                if isinstance(v, list) and v and all(isinstance(item, str) for item in v):
+                    joined = " ".join(item for item in v if len(item) > 10)
+                    if joined:
+                        return joined
+                # Case 2b: list of dicts — extract the longest string field per item
                 if isinstance(v, list) and v:
                     parts = []
                     for item in v:

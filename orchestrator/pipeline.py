@@ -74,6 +74,24 @@ class _TeeOutput:
 
 # ── JSON checkpoint helpers ────────────────────────────────────────────────────
 
+def _unload_ollama() -> None:
+    """Send keep_alive=0 to Ollama to unload the model and free VRAM for TTS."""
+    import urllib.request
+    local_model = os.getenv("LOCAL_LLM_MODEL", "qwen2.5:7b")
+    try:
+        payload = json.dumps({"model": local_model, "keep_alive": 0}).encode()
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+        log.info("ollama_unloaded", model=local_model)
+    except Exception as e:
+        log.debug("ollama_unload_skipped", reason=str(e))
+
+
 def _save_json(data, path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -477,12 +495,14 @@ class NewsFlowPipeline:
         else:
             script = ScriptWriterAgent().run(summaries, date)
 
-        # Coverage gap detection — find P0/P1 articles skipped or undercovered.
-        # Runs whether script was freshly generated or loaded from checkpoint.
-        gaps = _find_coverage_gaps(script, summaries)
-        skipped_ids = gaps["skipped"]
-        undercovered_ids = gaps["undercovered"]
-        gap_ids = skipped_ids + undercovered_ids
+        # Coverage gap detection — only run on freshly generated scripts.
+        # If loading from checkpoint, expansion was already applied; skip re-detection.
+        gap_ids = []
+        if not script_from_checkpoint:
+            gaps = _find_coverage_gaps(script, summaries)
+            skipped_ids = gaps["skipped"]
+            undercovered_ids = gaps["undercovered"]
+            gap_ids = skipped_ids + undercovered_ids
 
         if gap_ids:
             log.info(
@@ -563,6 +583,9 @@ class NewsFlowPipeline:
         _write_script_trace(script, logs_dir)
 
         # ── Stage 5: Audio Production ────────────────────────────────────────
+        # Unload Ollama model from VRAM before TTS — frees GPU memory for F5-TTS/Chatterbox.
+        _unload_ollama()
+
         if Path(metadata_path).exists():
             log.info("checkpoint_found", stage="audio_producer")
             episode = _load_json(metadata_path, Episode)

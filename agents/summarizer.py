@@ -29,11 +29,17 @@ log = structlog.get_logger(__name__)
 # Model for summarization (7B for better structured output quality)
 _SUMMARIZER_LOCAL_MODEL = os.getenv("SUMMARIZER_LOCAL_MODEL")
 
-# OpenRouter model for P0/P1 summarization (higher quality)
-_OPENROUTER_SUMMARIZER_MODEL = os.getenv(
-    "OPENROUTER_SUMMARIZER_MODEL",
-    "meta-llama/llama-3.3-70b-instruct:free",
-)
+# OpenRouter model chain for P0/P1 summarization — tried in order, falls back to local on error.
+# Override via comma-separated env var, e.g.:
+#   OPENROUTER_SUMMARIZER_MODELS=google/gemini-2.0-flash-exp:free,meta-llama/llama-3.3-70b-instruct:free
+_OPENROUTER_SUMMARIZER_MODELS: list[str] = [
+    m.strip()
+    for m in os.getenv(
+        "OPENROUTER_SUMMARIZER_MODELS",
+        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free",
+    ).split(",")
+    if m.strip()
+]
 
 # Sources whose articles are typically behind the ET paywall
 _ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
@@ -163,7 +169,7 @@ Rules:
 - Write for ears, not eyes — no bullet points in output
 - Stay within 400-500 words strictly"""
 
-        return self._call_llm(prompt, max_tokens=2048, use_openrouter=True)
+        return self._call_llm(prompt, max_tokens=4096, use_openrouter=True)
 
     def _summarize_p1(self, article: CuratedArticle, content: str) -> str:
         prompt = f"""Article: {article.title}
@@ -229,7 +235,7 @@ You MUST write a 400-500 word summary with ALL SIX sections labeled exactly:
 If COMPETITOR CONTEXT doesn't apply, write "Not directly applicable" and move on.
 Each section needs 2-3 sentences. Stay within 400-500 words total."""
 
-        return self._call_llm(retry_prompt, max_tokens=2048, use_openrouter=True)
+        return self._call_llm(retry_prompt, max_tokens=4096, use_openrouter=True)
 
     def _call_llm(
         self, prompt: str, max_tokens: int = 1024, use_openrouter: bool = False
@@ -245,7 +251,7 @@ Each section needs 2-3 sentences. Stay within 400-500 words total."""
             user=prompt,
             max_tokens=max_tokens,
             local_model_override=_SUMMARIZER_LOCAL_MODEL,
-            openrouter_model=_OPENROUTER_SUMMARIZER_MODEL if use_openrouter else None,
+            openrouter_models=_OPENROUTER_SUMMARIZER_MODELS if use_openrouter else None,
         )
 
     # -------------------------------------------------------------------------
@@ -253,20 +259,37 @@ Each section needs 2-3 sentences. Stay within 400-500 words total."""
     # -------------------------------------------------------------------------
 
     def _extract_key_takeaways(self, summary_text: str) -> list[str]:
-        """Extract CORE NEWS line from the structured summary as the key takeaway."""
-        takeaways = []
-        for line in summary_text.splitlines():
-            stripped = line.strip()
-            if "CORE NEWS" in stripped.upper():
-                parts = stripped.split(":", 1)
-                if len(parts) > 1 and parts[1].strip():
-                    takeaways.append(parts[1].strip())
+        """Extract 3 takeaways from the structured summary headers.
+
+        Pulls the first sentence after CORE NEWS, SURROUNDING IMPACT, and
+        PM INTERVIEW EDGE (or PM EDGE for P1/P2). Falls back to first 3
+        sentences of the text if headers are absent.
+        """
+        _TARGET_HEADERS = ("CORE NEWS", "SURROUNDING IMPACT", "PM INTERVIEW EDGE", "PM EDGE")
+        takeaways: list[str] = []
+        lines = summary_text.splitlines()
+        for i, line in enumerate(lines):
+            upper = line.strip().upper()
+            for header in _TARGET_HEADERS:
+                if header in upper:
+                    # Content may be on the same line after ":" or on the next line
+                    parts = line.strip().split(":", 1)
+                    if len(parts) > 1 and parts[1].strip():
+                        first_sentence = parts[1].strip().split(".")[0] + "."
+                        takeaways.append(first_sentence)
+                    elif i + 1 < len(lines) and lines[i + 1].strip():
+                        first_sentence = lines[i + 1].strip().split(".")[0] + "."
+                        takeaways.append(first_sentence)
                     break
-        if not takeaways and summary_text:
-            sentences = [s.strip() for s in summary_text.split(".") if s.strip()]
-            if sentences:
-                takeaways.append(sentences[0] + ".")
-        return takeaways
+            if len(takeaways) == 3:
+                break
+
+        # Fallback: first 3 sentences of plain text
+        if not takeaways:
+            sentences = [s.strip() for s in summary_text.replace("\n", " ").split(".") if s.strip()]
+            takeaways = [s + "." for s in sentences[:3]]
+
+        return takeaways[:3]
 
     def _extract_interview_edges(self, summary_text: str) -> list[str]:
         """Extract PM INTERVIEW EDGE or PM EDGE lines from the structured summary."""

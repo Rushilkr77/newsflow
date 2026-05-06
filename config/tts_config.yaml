@@ -6,7 +6,7 @@ primary:
     exaggeration: 0.4
     temperature: 0.7
     max_chars_per_call: 300
-  voice_reference: null
+    voice_reference: "C:/Users/hp/Downloads/got_s1e1_bastard.wav"
 
 fallback:
   provider: f5_tts
@@ -15,14 +15,22 @@ fallback:
     speed: 1.05                # slightly above 1.0 = natural podcast pace (~150 WPM)
     seed: -1                   # -1 = random seed per chunk (more natural variation)
     max_chars_per_call: 800    # ~130 words ~52 sec/chunk — preserves cross-sentence prosody
-  voice_reference: null        # path to a .wav reference clip for voice cloning (optional)
-  voice_reference_text: null   # transcript of the reference clip (required if voice_reference set)
+  voice_reference: "C:/Users/hp/Downloads/got_s1e1_bastard.wav"
+  voice_reference_text: "Let me give you some advice, bastard. Never forget what you are. The rest of the world will not. Wear it like honor, and it can never be used to hurt you. All dwarfs are bastards in their fathers' eyes."
 
 segment_routing:
-  # Chatterbox: short/punchy segments (disabled — OOM on this machine even with GPU)
-  chatterbox: []
-  # F5-TTS: all segments (GTX 1650 Ti, CUDA 12.4 — ~15x faster than CPU)
-  f5_tts:     [cold_open, intro, quick_hits, closing, ai_updates, funding, india_tech, product_strategy]
+  # Chatterbox: short/punchy segments (expressive, <300 chars/call)
+  chatterbox:
+    - cold_open
+    - intro
+    - quick_hits
+    - closing
+  # F5-TTS: long-form segments (800 char chunks, better cross-sentence prosody)
+  f5_tts:
+    - ai_updates
+    - funding
+    - india_tech
+    - product_strategy
 
 output:
   format: mp3

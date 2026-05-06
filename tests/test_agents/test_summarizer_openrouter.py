@@ -52,19 +52,19 @@ def _make_article(priority: str, full_text: str | None = None, snippet: str = "t
 class TestLlmClientOpenRouter:
     """Tests for the OpenRouter routing logic in utils/llm_client.py."""
 
-    def test_chat_falls_back_to_local_when_openrouter_model_is_none(self):
-        """chat() with openrouter_model=None must never call _chat_openrouter."""
+    def test_chat_falls_back_to_local_when_openrouter_models_is_none(self):
+        """chat() with openrouter_models=None must never call _chat_openrouter."""
         with patch("utils.llm_client._USE_LOCAL", True), \
              patch("utils.llm_client._chat_ollama", return_value="local result") as mock_local, \
              patch("utils.llm_client._chat_openrouter") as mock_or:
             from utils.llm_client import chat
-            result = chat("claude-haiku-4-5", "sys", "user", openrouter_model=None)
+            result = chat("claude-haiku-4-5", "sys", "user", openrouter_models=None)
         assert result == "local result"
         mock_local.assert_called_once()
         mock_or.assert_not_called()
 
     def test_chat_falls_back_to_local_when_api_key_missing(self):
-        """chat() with openrouter_model set but no key must use the local path."""
+        """chat() with openrouter_models set but no key must use the local path."""
         with patch("utils.llm_client._USE_LOCAL", True), \
              patch("utils.llm_client.OPENROUTER_API_KEY", ""), \
              patch("utils.llm_client._chat_ollama", return_value="local result") as mock_local, \
@@ -72,14 +72,14 @@ class TestLlmClientOpenRouter:
             from utils.llm_client import chat
             result = chat(
                 "claude-haiku-4-5", "sys", "user",
-                openrouter_model="meta-llama/llama-3.3-70b-instruct:free",
+                openrouter_models=["meta-llama/llama-3.3-70b-instruct:free"],
             )
         assert result == "local result"
         mock_local.assert_called_once()
         mock_or.assert_not_called()
 
-    def test_chat_routes_to_openrouter_when_key_present(self):
-        """chat() must call _chat_openrouter when both model and key are provided."""
+    def test_chat_routes_to_first_openrouter_model_when_key_present(self):
+        """chat() must try the first model in the list when key is provided."""
         with patch("utils.llm_client._USE_LOCAL", False), \
              patch("utils.llm_client.OPENROUTER_API_KEY", "sk-or-test-key"), \
              patch("utils.llm_client._chat_openrouter", return_value="or result") as mock_or, \
@@ -87,16 +87,32 @@ class TestLlmClientOpenRouter:
             from utils.llm_client import chat
             result = chat(
                 "claude-haiku-4-5", "sys", "user",
-                openrouter_model="meta-llama/llama-3.3-70b-instruct:free",
+                openrouter_models=["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.3-70b-instruct:free"],
             )
         assert result == "or result"
         mock_or.assert_called_once_with(
-            "meta-llama/llama-3.3-70b-instruct:free", "sys", "user", 2048
+            "google/gemini-2.0-flash-exp:free", "sys", "user", 2048
         )
         mock_ant.assert_not_called()
 
-    def test_chat_falls_back_to_anthropic_on_openrouter_error(self):
-        """If _chat_openrouter raises an OpenAI APIError, chat() falls through to Anthropic."""
+    def test_chat_tries_second_model_when_first_fails(self):
+        """chat() must try the next model in the list when the first raises an error."""
+        side_effects = [_api_error("rate limit"), "second result"]
+        with patch("utils.llm_client._USE_LOCAL", False), \
+             patch("utils.llm_client.OPENROUTER_API_KEY", "sk-or-test-key"), \
+             patch("utils.llm_client._chat_openrouter", side_effect=side_effects) as mock_or, \
+             patch("utils.llm_client._chat_anthropic") as mock_ant:
+            from utils.llm_client import chat
+            result = chat(
+                "claude-haiku-4-5", "sys", "user",
+                openrouter_models=["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.3-70b-instruct:free"],
+            )
+        assert result == "second result"
+        assert mock_or.call_count == 2
+        mock_ant.assert_not_called()
+
+    def test_chat_falls_back_to_anthropic_when_all_openrouter_models_fail(self):
+        """If all openrouter models fail, chat() falls through to Anthropic."""
         with patch("utils.llm_client._USE_LOCAL", False), \
              patch("utils.llm_client.OPENROUTER_API_KEY", "sk-or-test-key"), \
              patch("utils.llm_client._chat_openrouter", side_effect=_api_error("rate limit")), \
@@ -104,13 +120,13 @@ class TestLlmClientOpenRouter:
             from utils.llm_client import chat
             result = chat(
                 "claude-haiku-4-5", "sys", "user",
-                openrouter_model="meta-llama/llama-3.3-70b-instruct:free",
+                openrouter_models=["meta-llama/llama-3.3-70b-instruct:free"],
             )
         assert result == "anthropic result"
         mock_ant.assert_called_once()
 
-    def test_chat_falls_back_to_local_on_openrouter_error(self):
-        """If _chat_openrouter raises an OpenAI APIError and _USE_LOCAL=True, falls through to Ollama."""
+    def test_chat_falls_back_to_local_when_all_openrouter_models_fail(self):
+        """If all openrouter models fail and _USE_LOCAL=True, falls through to Ollama."""
         with patch("utils.llm_client._USE_LOCAL", True), \
              patch("utils.llm_client.OPENROUTER_API_KEY", "sk-or-test-key"), \
              patch("utils.llm_client._chat_openrouter", side_effect=_api_error("timeout")), \
@@ -118,7 +134,7 @@ class TestLlmClientOpenRouter:
             from utils.llm_client import chat
             result = chat(
                 "claude-haiku-4-5", "sys", "user",
-                openrouter_model="meta-llama/llama-3.3-70b-instruct:free",
+                openrouter_models=["meta-llama/llama-3.3-70b-instruct:free"],
             )
         assert result == "local fallback"
         mock_local.assert_called_once()
