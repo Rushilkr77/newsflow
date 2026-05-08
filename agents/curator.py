@@ -214,9 +214,10 @@ class CuratorAgent:
             self._prefs.get("dedup", {}).get("semantic_dedup_threshold", 0.82)
         )
 
-        # Lazy-load and cache the embedding model — force CPU so Ollama keeps full GPU VRAM
         if not hasattr(self, "_embed_model") or self._embed_model is None:
-            self._embed_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+            import torch
+            _dev = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+            self._embed_model = SentenceTransformer("all-MiniLM-L6-v2", device=_dev)
 
         titles = [a.title for a in articles]
         raw_embs = self._embed_model.encode(titles, convert_to_numpy=True)

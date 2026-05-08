@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.newsflow.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/rushilkr/Projects/newsflow/scripts/daily_run.sh</string>
+    </array>
+
+    <!-- Fire at 10:00 every day -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- launchd stdout/stderr (pipeline also logs to workspace/launchd_YYYY-MM-DD.log) -->
+    <key>StandardOutPath</key>
+    <string>/Users/rushilkr/Projects/newsflow/workspace/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/rushilkr/Projects/newsflow/workspace/launchd_stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Keep environment consistent regardless of login state -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/rushilkr</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

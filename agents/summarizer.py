@@ -12,7 +12,9 @@ Summary structure:
   P1 (150-200 words): CORE NEWS + IMPACT → HOW + WHY → PM EDGE
   P2 (60-80 words):   CORE NEWS → PM EDGE  (enough for a ~30-second mention)
 """
+import json
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 import structlog
@@ -57,16 +59,28 @@ def _url_domain(url: str) -> str | None:
 
 
 class SummarizerAgent:
-    def run(self, curated_articles: list[CuratedArticle]) -> list[ArticleSummary]:
-        log.info("summarizer_start", article_count=len(curated_articles))
+    def run(self, curated_articles: list[CuratedArticle], partial_path: str | None = None) -> list[ArticleSummary]:
+        # Load any already-completed summaries from a prior interrupted run
+        summaries: list[ArticleSummary] = []
+        done_ids: set[str] = set()
+        if partial_path and Path(partial_path).exists():
+            with open(partial_path) as f:
+                summaries = [ArticleSummary.model_validate(s) for s in json.load(f)]
+            done_ids = {s.article_id for s in summaries}
+            log.info("summarizer_resuming", already_done=len(done_ids))
 
-        self._fetch_full_text(curated_articles)
+        remaining = [a for a in curated_articles if a.id not in done_ids]
+        log.info("summarizer_start", total=len(curated_articles), remaining=len(remaining))
 
-        summaries = []
-        for article in curated_articles:
+        self._fetch_full_text(remaining)
+
+        for article in remaining:
             try:
                 summary = self._summarize(article)
                 summaries.append(summary)
+                if partial_path:
+                    with open(partial_path, "w") as f:
+                        json.dump([s.model_dump(mode="json") for s in summaries], f, default=str)
             except Exception as e:
                 log.error("summary_failed", article_id=article.id, title=article.title, error=str(e))
 

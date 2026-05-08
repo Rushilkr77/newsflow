@@ -12,10 +12,17 @@ from urllib.parse import urlparse
 import structlog
 import trafilatura
 from duckduckgo_search import DDGS
+from trafilatura.settings import use_config
 
 log = structlog.get_logger(__name__)
 
 _MIN_CHARS = 200
+_TRAFILATURA_CONFIG = use_config()
+_TRAFILATURA_CONFIG.set(
+    "DEFAULT",
+    "USER_AGENTS",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+)
 _MAX_RESULTS = 5          # fetch up to 5 results, try until one scrapes cleanly
 _MAX_ATTEMPTS = 3         # try at most 3 URLs
 
@@ -75,7 +82,7 @@ class DDGScraper:
 
     def _scrape(self, url: str) -> str | None:
         try:
-            downloaded = trafilatura.fetch_url(url)
+            downloaded = trafilatura.fetch_url(url, config=_TRAFILATURA_CONFIG)
             if downloaded:
                 return trafilatura.extract(
                     downloaded,

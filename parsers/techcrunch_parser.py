@@ -14,6 +14,7 @@ Confirmed structure:
 Skip: "A message from [sponsor]" blocks.
 URLs are embedded in "Read More" <a> tags.
 """
+import base64
 import re
 import uuid
 from datetime import datetime
@@ -23,6 +24,28 @@ from bs4 import BeautifulSoup
 from models.article import RawArticle
 from models.enums import Source
 from parsers.base_parser import BaseParser
+
+_TC_CLICK_RE = re.compile(r"https://link\.techcrunch\.com/click/[^/]+/(.+)", re.DOTALL)
+
+
+def _decode_tc_url(url: str) -> str:
+    """Decode link.techcrunch.com/click/{id}/{base64} → real article URL.
+
+    Email HTML line-wrapping can inject whitespace into the base64 segment;
+    strip it before decoding.  Returns original URL if decoding fails.
+    """
+    m = _TC_CLICK_RE.match(url)
+    if not m:
+        return url
+    b64 = re.sub(r"\s+", "", m.group(1))
+    pad = (4 - len(b64) % 4) % 4
+    try:
+        decoded = base64.b64decode(b64 + "=" * pad).decode("utf-8")
+        if decoded.startswith("http"):
+            return decoded
+    except Exception:
+        pass
+    return url
 
 
 # Section header prefixes in order of specificity (longer first to avoid partial matches)
@@ -76,7 +99,7 @@ class TechCrunchParser(BaseParser):
             if not href or not href.startswith("http"):
                 continue
 
-            url = self._clean_url(href)
+            url = self._clean_url(_decode_tc_url(href))
 
             # Extract title and snippet from the text before "Read More"
             # Pattern: "Article Title : One sentence summary. Read More"

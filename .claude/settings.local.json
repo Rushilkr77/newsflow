@@ -11,5 +11,9 @@
       "WebFetch(domain:costgoat.com)",
       "WebFetch(domain:openrouter.ai)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "code-review-graph"
+  ],
+  "enableAllProjectMcpServers": true
 }

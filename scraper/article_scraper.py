@@ -16,11 +16,19 @@ from urllib.parse import urlparse
 import structlog
 import trafilatura
 from newspaper import Article as NewspaperArticle
+from trafilatura.settings import use_config
 
 log = structlog.get_logger(__name__)
 
 _DOMAIN_LAST_REQUEST: dict[str, float] = defaultdict(float)
 _DOMAIN_DELAY_SEC = 1.5  # delay between requests to the same domain
+
+_TRAFILATURA_CONFIG = use_config()
+_TRAFILATURA_CONFIG.set(
+    "DEFAULT",
+    "USER_AGENTS",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+)
 
 
 class ArticleScraper:
@@ -50,7 +58,7 @@ class ArticleScraper:
 
     def _try_trafilatura(self, url: str) -> str | None:
         try:
-            downloaded = trafilatura.fetch_url(url)
+            downloaded = trafilatura.fetch_url(url, config=_TRAFILATURA_CONFIG)
             if downloaded:
                 return trafilatura.extract(
                     downloaded,

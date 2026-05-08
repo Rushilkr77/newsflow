@@ -85,6 +85,10 @@ dedup:
     - tldr_crypto
     - custom
 
+delivery:
+  recipient_email: rushilmisc77@gmail.com
+  send_on_failure: true
+
 time_budget:
   target_duration_min: 90
   min_duration_min: 40  # trigger expansion_mode re-run if script falls below this

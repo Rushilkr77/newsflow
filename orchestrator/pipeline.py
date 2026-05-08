@@ -60,6 +60,9 @@ class _TeeOutput:
         self._real.flush()
         self._file.flush()
 
+    def isatty(self) -> bool:
+        return False
+
     def close(self):
         self._file.close()
 
@@ -472,15 +475,13 @@ class NewsFlowPipeline:
         # ── Stage 3: Summarization (includes scraping P0/P1) ────────────────
         summaries_path = os.path.join(workspace, "summaries.json")
         enriched_path = os.path.join(workspace, "curated_articles_enriched.json")
-        if Path(summaries_path).exists():
-            log.info("checkpoint_found", stage="summarizer")
-            summaries = _load_json(summaries_path, ArticleSummary)
-        else:
-            summarizer = SummarizerAgent()
-            summaries = summarizer.run(curated)
-            _save_json(curated, enriched_path)   # save enriched (with full_text) too
-            _save_json(summaries, summaries_path)
-            log.info("summarization_complete", count=len(summaries))
+        summarizer = SummarizerAgent()
+        summaries = summarizer.run(curated, partial_path=summaries_path)
+        # Only write enriched if it doesn't exist — a resume run skips _fetch_full_text
+        # and would overwrite the enriched file (with full_text populated) with nulls.
+        if not Path(enriched_path).exists():
+            _save_json(curated, enriched_path)
+        log.info("summarization_complete", count=len(summaries))
 
         _write_summarization_trace(summaries, enriched_path, logs_dir)
 
@@ -521,7 +522,7 @@ class NewsFlowPipeline:
                 }
                 for seg in script.segments
             }
-            script = ScriptWriterAgent().run(summaries, date, expansion_mode=True, coverage_gaps=gap_ids)
+            script = ScriptWriterAgent().expand_segments(script, summaries, date, coverage_gaps=gap_ids)
             _save_json(script, script_path)
 
             # Post-expansion gap re-check and diff logging
@@ -605,13 +606,62 @@ class NewsFlowPipeline:
 
 def main():
     import argparse
+    import yaml
 
     parser = argparse.ArgumentParser(description="Run NewsFlow pipeline")
     parser.add_argument("--date", help="Date in YYYY-MM-DD format (default: today)")
+    parser.add_argument("--skip-email", action="store_true", help="Skip email delivery step")
     args = parser.parse_args()
 
     episode = NewsFlowPipeline().run(date=args.date)
     print(f"Episode saved to: {episode.file_path} ({episode.duration_sec // 60} min)")
+
+    if args.skip_email:
+        return
+
+    run_date = args.date or datetime.now().strftime("%Y-%m-%d")
+
+    prefs_path = Path(__file__).parent.parent / "config" / "preferences.yaml"
+    with open(prefs_path) as f:
+        prefs = yaml.safe_load(f)
+    delivery_cfg = prefs.get("delivery", {})
+    recipient = delivery_cfg.get("recipient_email")
+    if not recipient:
+        log.warning("email_skipped", reason="delivery.recipient_email not set in preferences.yaml")
+        return
+
+    workspace = Path(__file__).parent.parent / "workspace" / run_date
+    metadata_path = workspace / "episode_metadata.json"
+    episode_metadata: dict = {}
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            episode_metadata = json.load(f)
+
+    from orchestrator import run_review
+    review_path: Path | None = None
+    try:
+        review_path = run_review.generate(run_date)
+    except Exception as exc:
+        log.warning("review_report_failed", error=str(exc))
+
+    from delivery.drive_uploader import upload_episode
+    drive_link: str | None = None
+    try:
+        drive_link = upload_episode(Path(episode.file_path), run_date)
+    except Exception as exc:
+        log.warning("drive_upload_failed", error=str(exc))
+
+    from delivery.email_sender import send_episode_email
+    try:
+        send_episode_email(
+            recipient=recipient,
+            mp3_path=Path(episode.file_path),
+            review_md_path=review_path,
+            episode_metadata=episode_metadata,
+            drive_link=drive_link,
+        )
+    except Exception as exc:
+        log.warning("email_failed", recipient=recipient, error=str(exc))
 
 
 if __name__ == "__main__":

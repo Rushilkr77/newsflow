@@ -203,6 +203,89 @@ class ScriptWriterAgent:
         )
         return script
 
+    def expand_segments(
+        self,
+        script: PodcastScript,
+        summaries: list[ArticleSummary],
+        date: str,
+        coverage_gaps: list[str],
+    ) -> PodcastScript:
+        """Regenerate only the segments that contain gap articles.
+
+        All other segments are preserved verbatim from *script* so LLM variance
+        cannot shrink segments that were already adequate.
+        """
+        self._expansion_mode = True
+        self._coverage_gaps = coverage_gaps
+
+        gap_set = set(coverage_gaps)
+        gap_seg_types: set[str] = {
+            _CATEGORY_TO_SEGMENT.get(s.category, "quick_hits")
+            for s in summaries
+            if s.article_id in gap_set
+        }
+
+        if not gap_seg_types:
+            return script
+
+        log.info("expansion_targeted", gap_seg_types=sorted(gap_seg_types))
+
+        grouped = self._group_by_segment(summaries)
+        formatted_date = self._format_date(date)
+        top_for_intro = sorted(
+            summaries,
+            key=lambda s: (_PRIORITY_RANK.get(s.priority.value, 4), -s.word_count),
+        )[:3]
+
+        seg_by_type = {seg.segment_type: seg for seg in script.segments}
+        new_segments: list[Segment] = []
+        generated_plain_texts: list[str] = []
+
+        for seg_id, seg_title in _SEGMENT_ORDER:
+            if seg_id not in seg_by_type:
+                continue
+
+            if seg_id not in gap_seg_types:
+                orig = seg_by_type[seg_id]
+                new_segments.append(orig)
+                generated_plain_texts.append(orig.content_plain)
+                continue
+
+            seg_summaries = top_for_intro if seg_id == "intro" else grouped.get(seg_id, [])
+            if not seg_summaries:
+                orig = seg_by_type[seg_id]
+                new_segments.append(orig)
+                generated_plain_texts.append(orig.content_plain)
+                continue
+
+            try:
+                seg = self._generate_segment(
+                    seg_id=seg_id,
+                    seg_title=seg_title,
+                    summaries=seg_summaries,
+                    date=date,
+                    formatted_date=formatted_date,
+                    all_summaries=summaries,
+                    prior_plain_texts=generated_plain_texts,
+                )
+                new_segments.append(seg)
+                generated_plain_texts.append(seg.content_plain)
+                log.info("segment_expanded", segment_type=seg_id, duration_sec=seg.duration_estimate_sec)
+            except Exception as e:
+                log.error("segment_expansion_failed", segment_type=seg_id, error=str(e))
+                orig = seg_by_type[seg_id]
+                new_segments.append(orig)
+                generated_plain_texts.append(orig.content_plain)
+
+        total_min = sum(s.duration_estimate_sec for s in new_segments) // 60
+        return PodcastScript(
+            episode_number=script.episode_number,
+            date=script.date,
+            total_estimated_duration_min=total_min,
+            segments=new_segments,
+            top_takeaways=script.top_takeaways,
+        )
+
     # -------------------------------------------------------------------------
     # Segment generation
     # -------------------------------------------------------------------------
@@ -275,7 +358,7 @@ class ScriptWriterAgent:
             parts.append(part_text)
             all_source_ids.extend(s.article_id for s in batch)
 
-        combined_plain = ' '.join(parts)
+        combined_plain = ' '.join(re.sub(r"<[^>]+>", "", p) for p in parts)
         combined_ssml = ' <break time="1000ms"/> '.join(parts)
         duration_sec = max(30, len(combined_plain) // _CHARS_PER_SEC)
 

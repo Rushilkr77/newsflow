@@ -111,7 +111,12 @@ class ChatterboxProvider:
             from chatterbox.tts import ChatterboxTTS  # type: ignore[import]
             try:
                 import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif torch.backends.mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
             except ImportError:
                 device = "cpu"
             log.info("chatterbox_model_loading", device=device)
