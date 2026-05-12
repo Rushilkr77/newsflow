@@ -18,7 +18,7 @@ Multi-agent pipeline that transforms daily email newsletters into a single-host 
 - **User**: Rushil (rushilmisc77@gmail.com)
 - **Use case**: Listen during gym sessions, stay current on AI/tech for PM interviews
 - **Location**: India (IST timezone)
-- **Schedule**: Pipeline runs at 5:00 AM IST daily
+- **Schedule**: Pipeline runs at 10:00 AM IST daily (launchd, macOS)
 
 ## Tech Stack
 
@@ -32,12 +32,12 @@ Multi-agent pipeline that transforms daily email newsletters into a single-host 
 | LLM (Classification) | Claude Haiku 4.5 via Anthropic API |
 | LLM (Summarization) | Claude Sonnet 4.5 via Anthropic API |
 | LLM (Script Writing) | Claude Sonnet 4.5 via Anthropic API |
-| TTS (Primary) | Chatterbox TTS via HuggingFace (free) |
-| TTS (Fallback) | ElevenLabs API (paid, higher quality) |
+| TTS (Primary) | Chatterbox TTS (free, local, MPS/CUDA/CPU) |
+| TTS (Fallback) | F5-TTS (free, local, natural podcast prosody) |
 | Audio Processing | pydub + ffmpeg |
 | Data Validation | Pydantic v2 |
-| Scheduling | APScheduler / cron |
-| Delivery | Podcast RSS feed + Telegram bot |
+| Scheduling | launchd (macOS) — `scripts/com.newsflow.daily.plist` |
+| Delivery | Google Drive (MP3) + Gmail SMTP (link + review report) |
 
 ## Project Structure
 
@@ -68,7 +68,8 @@ newsflow-ai/
 -"-   -""-"--"- content_cleaner.py        # Strip ads, nav, extract article body
 -"--"--"- orchestrator/
 -"-   -"--"--"- pipeline.py               # Sequential pipeline runner with checkpoints
--"-   -""-"--"- scheduler.py              # Cron/APScheduler config (5 AM IST)
+-"-   -"--"--"- run_review.py              # Auto-generate /newsflow-review report after each run
+-"-   -""-"--"- scheduler.py              # Legacy APScheduler config (not used; replaced by launchd)
 -"--"--"- models/
 -"-   -"--"--"- article.py                # Pydantic: RawArticle, CuratedArticle
 -"-   -"--"--"- podcast.py                # Pydantic: PodcastScript, Segment, Episode
@@ -78,8 +79,13 @@ newsflow-ai/
 -"-   -"--"--"- summarizer_eval.py        # Factual accuracy checks
 -"-   -""-"--"- e2e_eval.py               # End-to-end pipeline tests
 -"--"--"- delivery/
--"-   -"--"--"- rss_feed.py               # Podcast RSS generator
--"-   -""-"--"- telegram_bot.py           # Notification + feedback bot
+-"-   -"--"--"- drive_uploader.py         # Upload MP3 to Google Drive (drive.file scope)
+-"-   -"--"--"- email_sender.py           # Send episode link + review report via Gmail SMTP
+-"-   -"--"--"- rss_feed.py               # Podcast RSS generator (legacy, not active)
+-"-   -""-"--"- telegram_bot.py           # Notification + feedback bot (legacy, not active)
+-"--"--"- scripts/
+-"-   -"--"--"- daily_run.sh              # Shell wrapper invoked by launchd
+-"-   -""-"--"- com.newsflow.daily.plist  # launchd job — fires at 10:00 AM IST
 -"--"--"- workspace/                    # Daily pipeline outputs (gitignored)
 -"--"--"- tests/
 -"-   -"--"--"- test_parsers/

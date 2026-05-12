@@ -1,61 +1,67 @@
 """
-Inc42 fallback scraper for ET article titles.
-ET Tech and ET AI articles link to economictimes.indiatimes.com (paywalled).
-Strategy: search Inc42.com for the article title, scrape the top matching result.
-"""
-import urllib.parse
+India tech fallback scraper for paywalled ET articles.
+Uses DuckDuckGo site: search to find the article on a given India news site,
+then fetches the content via trafilatura.
 
-import requests
-import structlog
+Default site is inc42.com. Pass a different site + valid_path_segments to
+reuse for YourStory, Entrackr, etc.
+"""
 import trafilatura
+import structlog
+from ddgs import DDGS
 
 log = structlog.get_logger(__name__)
 
-_SEARCH_URL = "https://inc42.com/?s={query}"
-_REQUEST_TIMEOUT = 5  # seconds
-_MIN_ARTICLE_CHARS = 150
+_MIN_ARTICLE_CHARS = 1000
+_MAX_DDG_RESULTS = 5
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-}
-
-# URL path segments that indicate real article pages (not tag/category pages)
-_VALID_PATH_SEGMENTS = ("/features/", "/news/", "/buzz/")
+# Default valid path segments for inc42.com.
+# /startups/ covers funding/M&A stories (e.g. inc42.com/startups/news/…).
+_INC42_PATHS = ("/features/", "/news/", "/buzz/", "/startups/")
 
 
 class Inc42Scraper:
+    """Search a given India tech site via DDG and scrape the result.
+
+    Default args target inc42.com. Pass site + valid_path_segments to reuse
+    for YourStory, Entrackr, or any India news site.
+    """
+
+    def __init__(
+        self,
+        site: str = "inc42.com",
+        valid_path_segments: tuple[str, ...] = _INC42_PATHS,
+    ):
+        self._site = site
+        self._valid_paths = valid_path_segments
+
     def search_and_fetch(self, title: str) -> str | None:
         """
-        Search Inc42 for an article matching *title* and return its full text.
-
-        Returns scraped text (len > _MIN_ARTICLE_CHARS) on success, None otherwise.
-        All exceptions are caught — this method never raises.
+        Find an article matching *title* on self._site via DDG and return full text.
+        Returns scraped text on success, None otherwise. Never raises.
         """
         try:
             article_url = self._find_article_url(title)
             if not article_url:
-                log.debug("inc42_no_result", title=title[:60])
+                log.info("india_scraper_no_result", site=self._site, title=title[:60])
                 return None
 
             text = self._scrape_url(article_url)
             if text and len(text) > _MIN_ARTICLE_CHARS:
                 log.debug(
-                    "inc42_fetch",
+                    "india_scraper_fetch",
+                    site=self._site,
                     title=title[:60],
                     result_url=article_url,
                     chars=len(text),
                 )
                 return text
 
-            log.debug("inc42_text_too_short", title=title[:60], result_url=article_url)
+            log.debug("india_scraper_text_too_short", site=self._site, title=title[:60])
             return None
 
         except Exception as exc:
-            log.debug("inc42_error", title=title[:60], error=str(exc))
+            log.debug("india_scraper_error", site=self._site, title=title[:60], error=str(exc))
             return None
 
     # -------------------------------------------------------------------------
@@ -63,44 +69,44 @@ class Inc42Scraper:
     # -------------------------------------------------------------------------
 
     def _find_article_url(self, title: str) -> str | None:
-        """
-        Fetch the Inc42 search results page and return the first suitable URL.
+        """Use DDG site: search to find the article URL.
+        Avoids the site's own search endpoint (often 403 for automated requests)."""
+        try:
+            results = list(DDGS().text(f"site:{self._site} {title}", max_results=_MAX_DDG_RESULTS))
+        except Exception as exc:
+            log.info("india_scraper_ddg_error", site=self._site, title=title[:60], error=str(exc))
+            return None
 
-        Looks for <article> tags or <h2> elements that contain an <a href>.
-        Accepts only paths that contain /features/, /news/, or /buzz/.
-        """
-        search_url = _SEARCH_URL.format(query=urllib.parse.quote(title))
-        response = requests.get(search_url, timeout=_REQUEST_TIMEOUT, headers=_HEADERS)
-        response.raise_for_status()
-
-        # Lazy import to avoid hard dependency at module load time in tests
-        from bs4 import BeautifulSoup
-
-        soup = BeautifulSoup(response.text, "lxml")
-
-        # Strategy 1: <article> tags (standard HTML5 search result cards)
-        for article_tag in soup.find_all("article"):
-            link = article_tag.find("a", href=True)
-            if link:
-                href = link["href"]
-                if self._is_valid_article_url(href):
-                    return href
-
-        # Strategy 2: <h2> elements containing an <a href> (common in WordPress themes)
-        for h2 in soup.find_all("h2"):
-            link = h2.find("a", href=True)
-            if link:
-                href = link["href"]
-                if self._is_valid_article_url(href):
-                    return href
+        for result in results:
+            url = result.get("href") or result.get("url", "")
+            if url and self._is_valid_article_url(url):
+                return url
 
         return None
 
     def _is_valid_article_url(self, href: str) -> bool:
-        """Return True if the URL path looks like a real Inc42 article."""
+        """Return True if the URL looks like a real article on self._site.
+
+        Rejects pure category/listing pages where the path ends immediately
+        after the segment (e.g. /buzz/ with no article slug after it).
+        """
         if not href or not href.startswith("http"):
             return False
-        return any(segment in href for segment in _VALID_PATH_SEGMENTS)
+        if self._site not in href:
+            return False
+        from urllib.parse import urlparse
+        path = urlparse(href).path
+        if not self._valid_paths:
+            return len(path.strip("/")) > 5
+        for seg in self._valid_paths:
+            idx = path.find(seg)
+            if idx == -1:
+                continue
+            # Require a slug of at least 5 chars after the segment
+            after = path[idx + len(seg):].strip("/")
+            if len(after) >= 5:
+                return True
+        return False
 
     def _scrape_url(self, url: str) -> str | None:
         """Fetch and extract article text via trafilatura."""

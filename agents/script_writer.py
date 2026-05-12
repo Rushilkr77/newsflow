@@ -60,9 +60,11 @@ _SEGMENT_MAX_TOKENS: dict[str, int] = {
 # A single article is never split across batches.
 _MAX_SUMMARY_CHARS_PER_CALL = 3500
 
-# Spoken pace for duration estimation. Measured from actual gTTS output:
-# 22452 chars → 1714 sec actual = ~13.1 chars/sec.
-_CHARS_PER_SEC = 13
+# Spoken pace for duration estimation.
+# gTTS baseline: 22452 chars → 1714 sec = ~13 chars/sec.
+# Chatterbox/ElevenLabs speak ~43% faster; recalibrated from 2026-05-12 run:
+# estimated 67 min (at 13 c/s) vs actual audio 47 min → true rate ≈ 18.5 chars/sec.
+_CHARS_PER_SEC = 19  # conservative rounding keeps estimates slightly under actual
 
 # Instruction injected into both call paths to prevent verbatim hint copying.
 _INTERVIEW_EDGE_INSTRUCTION = """

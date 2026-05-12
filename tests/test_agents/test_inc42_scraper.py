@@ -15,44 +15,19 @@ from scraper.inc42_scraper import Inc42Scraper
 # Fixtures
 # ---------------------------------------------------------------------------
 
-FAKE_SEARCH_HTML_WITH_RESULTS = """
-<!DOCTYPE html>
-<html>
-<body>
-  <article>
-    <h2><a href="https://inc42.com/buzz/openai-gpt5-launch-india/">OpenAI GPT-5 Launches in India</a></h2>
-    <p>OpenAI has officially launched GPT-5 in India...</p>
-  </article>
-  <article>
-    <h2><a href="https://inc42.com/news/another-story/">Another Story</a></h2>
-    <p>Some other content.</p>
-  </article>
-</body>
-</html>
-"""
+FAKE_DDG_RESULTS = [
+    {"href": "https://inc42.com/buzz/openai-gpt5-launch-india/", "title": "OpenAI GPT-5 Launches in India"},
+    {"href": "https://inc42.com/news/another-story/", "title": "Another Story"},
+]
 
-FAKE_SEARCH_HTML_NO_RESULTS = """
-<!DOCTYPE html>
-<html>
-<body>
-  <p>No results found.</p>
-</body>
-</html>
-"""
+FAKE_DDG_RESULTS_STARTUPS = [
+    {"href": "https://inc42.com/startups/news/dailyobjects-funding-round/", "title": "DailyObjects funding"},
+]
 
-FAKE_SEARCH_HTML_ONLY_INVALID_URLS = """
-<!DOCTYPE html>
-<html>
-<body>
-  <article>
-    <h2><a href="https://inc42.com/tag/openai/">Tag: OpenAI</a></h2>
-  </article>
-  <article>
-    <h2><a href="https://inc42.com/author/reporter/">Reporter</a></h2>
-  </article>
-</body>
-</html>
-"""
+FAKE_DDG_RESULTS_NO_VALID = [
+    {"href": "https://inc42.com/tag/openai/", "title": "Tag: OpenAI"},
+    {"href": "https://inc42.com/author/reporter/", "title": "Reporter"},
+]
 
 FAKE_ARTICLE_TEXT = (
     "OpenAI has officially launched GPT-5 in India with new pricing for enterprise customers. "
@@ -63,16 +38,16 @@ FAKE_ARTICLE_TEXT = (
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helper to mock DDGS
 # ---------------------------------------------------------------------------
 
-def _make_response(html: str, status_code: int = 200) -> MagicMock:
-    """Return a mock requests.Response object."""
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.text = html
-    resp.raise_for_status = MagicMock()  # does nothing (success)
-    return resp
+def _mock_ddgs(results):
+    """Return a context manager that patches duckduckgo_search.DDGS."""
+    mock = MagicMock()
+    mock.return_value.__enter__ = MagicMock(return_value=mock.return_value)
+    mock.return_value.__exit__ = MagicMock(return_value=False)
+    mock.return_value.text.return_value = iter(results)
+    return patch("scraper.inc42_scraper.DDGS", mock)
 
 
 # ---------------------------------------------------------------------------
@@ -82,44 +57,41 @@ def _make_response(html: str, status_code: int = 200) -> MagicMock:
 class TestSearchAndFetchSuccess:
     @patch("scraper.inc42_scraper.trafilatura.extract", return_value=FAKE_ARTICLE_TEXT)
     @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value="<html>...</html>")
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_scraped_text(self, mock_get, mock_fetch_url, mock_extract):
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_WITH_RESULTS)
-
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_scraped_text(self, mock_fetch_url, mock_extract):
+        with _mock_ddgs(FAKE_DDG_RESULTS):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
         assert result == FAKE_ARTICLE_TEXT
 
     @patch("scraper.inc42_scraper.trafilatura.extract", return_value=FAKE_ARTICLE_TEXT)
     @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value="<html>...</html>")
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_uses_first_valid_article_url(self, mock_get, mock_fetch_url, mock_extract):
-        """The scraper should pick the first /buzz/ or /news/ or /features/ URL."""
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_WITH_RESULTS)
-
-        scraper = Inc42Scraper()
-        scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
-        # trafilatura should have been called with the first result URL
-        mock_fetch_url.assert_called_once_with(
-            "https://inc42.com/buzz/openai-gpt5-launch-india/"
-        )
+    def test_uses_first_valid_article_url(self, mock_fetch_url, mock_extract):
+        """Scraper should pick the first valid URL from DDG results."""
+        with _mock_ddgs(FAKE_DDG_RESULTS):
+            scraper = Inc42Scraper()
+            scraper.search_and_fetch("OpenAI GPT-5 launch India")
+        mock_fetch_url.assert_called_once_with("https://inc42.com/buzz/openai-gpt5-launch-india/")
 
     @patch("scraper.inc42_scraper.trafilatura.extract", return_value=FAKE_ARTICLE_TEXT)
     @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value="<html>...</html>")
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_search_url_encodes_title(self, mock_get, mock_fetch_url, mock_extract):
-        """Special characters in the title must be URL-encoded."""
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_WITH_RESULTS)
+    def test_searches_with_site_prefix(self, mock_fetch_url, mock_extract):
+        """DDG query must use site:inc42.com prefix."""
+        mock_ddgs = MagicMock()
+        mock_ddgs.return_value.text.return_value = iter(FAKE_DDG_RESULTS)
+        with patch("scraper.inc42_scraper.DDGS", mock_ddgs):
+            scraper = Inc42Scraper()
+            scraper.search_and_fetch("OpenAI GPT-5 launch India")
+        call_query = mock_ddgs.return_value.text.call_args[0][0]
+        assert call_query.startswith("site:inc42.com ")
 
-        scraper = Inc42Scraper()
-        scraper.search_and_fetch("AI & ML: India's Future")
-
-        call_url = mock_get.call_args[0][0]
-        # The query string should not contain raw spaces or '&'
-        assert " " not in call_url
-        assert call_url.startswith("https://inc42.com/?s=")
+    @patch("scraper.inc42_scraper.trafilatura.extract", return_value=FAKE_ARTICLE_TEXT)
+    @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value="<html>...</html>")
+    def test_accepts_startups_url(self, mock_fetch_url, mock_extract):
+        """/startups/ path is a valid Inc42 article URL."""
+        with _mock_ddgs(FAKE_DDG_RESULTS_STARTUPS):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("DailyObjects funding round")
+        assert result == FAKE_ARTICLE_TEXT
 
 
 # ---------------------------------------------------------------------------
@@ -127,23 +99,24 @@ class TestSearchAndFetchSuccess:
 # ---------------------------------------------------------------------------
 
 class TestSearchAndFetchNoResults:
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_none_when_no_article_links(self, mock_get):
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_NO_RESULTS)
-
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_none_when_only_invalid_urls(self):
+        """Tag/author pages are not valid article URLs."""
+        with _mock_ddgs(FAKE_DDG_RESULTS_NO_VALID):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
         assert result is None
 
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_none_when_only_invalid_urls(self, mock_get):
-        """Tag/author pages are not valid article URLs — should be skipped."""
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_ONLY_INVALID_URLS)
+    def test_returns_none_when_empty_results(self):
+        with _mock_ddgs([]):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
+        assert result is None
 
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_none_on_non_inc42_url(self):
+        """DDG might return results from other domains — must be filtered out."""
+        with _mock_ddgs([{"href": "https://techcrunch.com/some-story/"}]):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("Some startup story")
         assert result is None
 
 
@@ -154,28 +127,18 @@ class TestSearchAndFetchNoResults:
 class TestSearchAndFetchShortText:
     @patch("scraper.inc42_scraper.trafilatura.extract", return_value="Too short.")
     @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value="<html>...</html>")
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_none_when_extracted_text_too_short(
-        self, mock_get, mock_fetch_url, mock_extract
-    ):
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_WITH_RESULTS)
-
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_none_when_extracted_text_too_short(self, mock_fetch_url, mock_extract):
+        with _mock_ddgs(FAKE_DDG_RESULTS):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
         assert result is None
 
     @patch("scraper.inc42_scraper.trafilatura.extract", return_value=None)
     @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value="<html>...</html>")
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_none_when_trafilatura_returns_none(
-        self, mock_get, mock_fetch_url, mock_extract
-    ):
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_WITH_RESULTS)
-
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_none_when_trafilatura_returns_none(self, mock_fetch_url, mock_extract):
+        with _mock_ddgs(FAKE_DDG_RESULTS):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
         assert result is None
 
 
@@ -184,40 +147,17 @@ class TestSearchAndFetchShortText:
 # ---------------------------------------------------------------------------
 
 class TestSearchAndFetchNetworkErrors:
-    @patch("scraper.inc42_scraper.requests.get", side_effect=ConnectionError("timeout"))
-    def test_returns_none_on_connection_error(self, mock_get):
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
-        assert result is None
-
-    @patch("scraper.inc42_scraper.requests.get", side_effect=Exception("unexpected"))
-    def test_returns_none_on_generic_exception(self, mock_get):
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
-        assert result is None
-
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_none_on_http_error(self, mock_get):
-        from requests.exceptions import HTTPError
-
-        resp = MagicMock()
-        resp.raise_for_status.side_effect = HTTPError("503 Service Unavailable")
-        mock_get.return_value = resp
-
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_none_on_ddg_error(self):
+        mock_ddgs = MagicMock()
+        mock_ddgs.return_value.text.side_effect = Exception("rate limited")
+        with patch("scraper.inc42_scraper.DDGS", mock_ddgs):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
         assert result is None
 
     @patch("scraper.inc42_scraper.trafilatura.fetch_url", return_value=None)
-    @patch("scraper.inc42_scraper.requests.get")
-    def test_returns_none_when_trafilatura_fetch_fails(self, mock_get, mock_fetch_url):
-        """trafilatura.fetch_url returning None (e.g. connection refused) is handled."""
-        mock_get.return_value = _make_response(FAKE_SEARCH_HTML_WITH_RESULTS)
-
-        scraper = Inc42Scraper()
-        result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
-
+    def test_returns_none_when_trafilatura_fetch_fails(self, mock_fetch_url):
+        with _mock_ddgs(FAKE_DDG_RESULTS):
+            scraper = Inc42Scraper()
+            result = scraper.search_and_fetch("OpenAI GPT-5 launch India")
         assert result is None
