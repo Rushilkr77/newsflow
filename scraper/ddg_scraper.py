@@ -11,12 +11,12 @@ from urllib.parse import urlparse
 
 import structlog
 import trafilatura
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from trafilatura.settings import use_config
 
 log = structlog.get_logger(__name__)
 
-_MIN_CHARS = 200
+_MIN_CHARS = 500
 _TRAFILATURA_CONFIG = use_config()
 _TRAFILATURA_CONFIG.set(
     "DEFAULT",
@@ -26,15 +26,18 @@ _TRAFILATURA_CONFIG.set(
 _MAX_RESULTS = 5          # fetch up to 5 results, try until one scrapes cleanly
 _MAX_ATTEMPTS = 3         # try at most 3 URLs
 
-# Domains we know are paywalled or unhelpful
+# Domains we know are paywalled or unhelpful.
+# NOTE: economictimes.indiatimes.com is intentionally excluded — email redirect URLs
+# hit a paywall but DDG-found articleshow/ URLs are freely scrapeable.
 _SKIP_DOMAINS = frozenset({
-    "economictimes.indiatimes.com",
     "wsj.com",
     "ft.com",
     "bloomberg.com",
     "businessinsider.com",
     "fortune.com",
     "paywall.techcrunch.com",
+    "news.google.com",   # aggregator redirect, not scrapeable article content
+    "msn.com",          # aggregator, thin content
 })
 
 

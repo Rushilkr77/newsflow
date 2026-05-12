@@ -8,11 +8,11 @@ reuse for YourStory, Entrackr, etc.
 """
 import trafilatura
 import structlog
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 log = structlog.get_logger(__name__)
 
-_MIN_ARTICLE_CHARS = 150
+_MIN_ARTICLE_CHARS = 1000
 _MAX_DDG_RESULTS = 5
 
 # Default valid path segments for inc42.com.
@@ -85,15 +85,28 @@ class Inc42Scraper:
         return None
 
     def _is_valid_article_url(self, href: str) -> bool:
-        """Return True if the URL looks like a real article on self._site."""
+        """Return True if the URL looks like a real article on self._site.
+
+        Rejects pure category/listing pages where the path ends immediately
+        after the segment (e.g. /buzz/ with no article slug after it).
+        """
         if not href or not href.startswith("http"):
             return False
         if self._site not in href:
             return False
+        from urllib.parse import urlparse
+        path = urlparse(href).path
         if not self._valid_paths:
-            from urllib.parse import urlparse
-            return len(urlparse(href).path.strip("/")) > 5
-        return any(seg in href for seg in self._valid_paths)
+            return len(path.strip("/")) > 5
+        for seg in self._valid_paths:
+            idx = path.find(seg)
+            if idx == -1:
+                continue
+            # Require a slug of at least 5 chars after the segment
+            after = path[idx + len(seg):].strip("/")
+            if len(after) >= 5:
+                return True
+        return False
 
     def _scrape_url(self, url: str) -> str | None:
         """Fetch and extract article text via trafilatura."""

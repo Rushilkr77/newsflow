@@ -23,7 +23,6 @@ from mcp_servers.article_fetcher_server import fetch_article_content
 from models.article import ArticleSummary, CuratedArticle
 from models.enums import Priority, Source
 from scraper.ddg_scraper import DDGScraper
-from scraper.inc42_scraper import Inc42Scraper
 from utils.llm_client import chat
 
 log = structlog.get_logger(__name__)
@@ -43,17 +42,9 @@ _OPENROUTER_SUMMARIZER_MODELS: list[str] = [
     if m.strip()
 ]
 
-# Sources whose articles are typically behind the ET paywall
+# Sources whose email links hit a paywall — DDG finds the articleshow/ URL directly.
 _ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
 
-# India-specific scrapers tried in order for paywalled ET articles.
-# Each uses DDG site: search to bypass the site's own blocked search endpoint.
-_INDIA_SCRAPERS: list[Inc42Scraper] = [
-    Inc42Scraper("inc42.com",     ("/features/", "/news/", "/buzz/", "/startups/")),
-    Inc42Scraper("yourstory.com", ("/stories/", "/startup/", "/tech/", "/companies/",
-                                   "/2024/", "/2025/", "/2026/")),
-    Inc42Scraper("entrackr.com",  ("/story/", "/news/")),
-]
 _ddg_scraper = DDGScraper()
 
 
@@ -113,27 +104,11 @@ class SummarizerAgent:
                 log.debug("article_fetched", article_id=article.id, chars=len(text))
                 continue
 
-            if article.source in _ET_SOURCES:
-                # ET articles are paywalled — try India tech sites in priority order
-                # (inc42 → yourstory → entrackr) before falling back to general DDG.
-                for scraper in _INDIA_SCRAPERS:
-                    india_text = scraper.search_and_fetch(article.title)
-                    if india_text:
-                        article.full_text = india_text
-                        log.info(
-                            "india_fallback_used",
-                            site=scraper._site,
-                            article_id=article.id,
-                            title=article.title[:60],
-                            chars=len(india_text),
-                        )
-                        break
-                if article.full_text:
-                    continue
-                # All India sites missed it — fall through to general DDG
-
-            # General DDG fallback for all sources (inc42 miss or non-ET source)
-            ddg_text = _ddg_scraper.search_and_fetch(article.title, skip_domain=skip_domain)
+            # General DDG fallback for all sources.
+            # ET email redirect URLs hit a paywall, but DDG finds the articleshow/ URL
+            # which is freely scrapeable — so don't skip ET domain for ET sources.
+            ddg_skip = None if article.source in _ET_SOURCES else skip_domain
+            ddg_text = _ddg_scraper.search_and_fetch(article.title, skip_domain=ddg_skip)
             if ddg_text:
                 article.full_text = ddg_text
                 log.info(

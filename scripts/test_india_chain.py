@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from scraper.inc42_scraper import Inc42Scraper
+from scraper.ddg_scraper import DDGScraper
 
 INDIA_SCRAPERS = [
     Inc42Scraper("inc42.com",     ("/features/", "/news/", "/buzz/", "/startups/")),
@@ -30,11 +31,15 @@ INDIA_SCRAPERS = [
     Inc42Scraper("entrackr.com",  ("/story/", "/news/")),
 ]
 
-# Today's failing ET article titles from the 2026-05-12 run
+DDG_SCRAPER = DDGScraper()
+
+# ET article titles from the 2026-05-12 run
 TEST_ARTICLES = [
     ("P0", "ettech", "Jio IPO set to be fully fresh funding; no OFS"),
     ("P0", "ettech", "DailyObjects in talks to close Rs 300 crore funding round"),
     ("P1", "ettech", "Wingreens World snaps up Safe Harvest in all-stock deal"),
+    ("P1", "ettech", "Swiggy shares plunge 7% after Q4 results"),
+    ("P1", "ettech", "IT employees body urges govt to mandate work-from-home for 5.8 million workforce"),
 ]
 
 
@@ -56,7 +61,7 @@ def run_fetch_test() -> dict[str, tuple[str | None, str | None]]:
             if url:
                 text = scraper._scrape_url(url)
                 chars = len(text) if text else 0
-                if text and chars > 150:
+                if text and chars > 1000:
                     print(f"  ✓ {scraper._site}")
                     print(f"    URL    : {url}")
                     print(f"    Chars  : {chars}")
@@ -72,7 +77,18 @@ def run_fetch_test() -> dict[str, tuple[str | None, str | None]]:
                 print(f"  ✗ {scraper._site}: no result")
 
         if not found_site:
-            print("  → All India sites missed — would fall through to general DDG")
+            # Test general DDG fallback (ET skip_domain=None — ET direct URLs are scrapeable)
+            ddg_text = DDG_SCRAPER.search_and_fetch(title, skip_domain=None)
+            if ddg_text:
+                chars = len(ddg_text)
+                preview = ddg_text[:500].replace("\n", " ")
+                print(f"  ✓ general-DDG (ET direct)")
+                print(f"    Chars  : {chars}")
+                print(f"    Preview: {textwrap.shorten(preview, 280)}")
+                found_site = "general-ddg"
+                found_text = ddg_text
+            else:
+                print("  → All fallbacks missed — snippet-only")
         results[title] = (found_site, found_text)
 
     return results
