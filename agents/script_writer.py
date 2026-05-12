@@ -44,14 +44,13 @@ _MAX_RETRIES = 4
 # Per-segment token budgets. Sized to allow 45 min episodes with current article
 # volumes; will fill toward 90 min naturally as Phase 2 ET sources add more articles.
 _SEGMENT_MAX_TOKENS: dict[str, int] = {
-    "cold_open": 512,
-    "intro": 1024,
-    "ai_updates": 8192,      # Largest segment — bumped from 4096 to reach 20-30 min
-    "funding": 3072,          # Bumped from 2048; headroom for Phase 2 ET sources
-    "india_tech": 2048,       # Bumped from 1024; ET Tech/ET AI will add India stories
-    "product_strategy": 3072, # Bumped from 2048
-    "quick_hits": 2048,       # Bumped from 1024
-    "closing": 2048,
+    "opener": 512,
+    "ai_updates": 5120,      # 15-18 min target; P0 deep + P1 tight
+    "funding": 2048,
+    "india_tech": 1536,
+    "product_strategy": 2048,
+    "quick_hits": 1024,
+    "closing": 1024,
 }
 
 # Max total summary chars passed to a single LLM call.
@@ -79,8 +78,7 @@ For every article: explain WHAT the technical decision is, WHY it creates produc
 
 # Segment order
 _SEGMENT_ORDER = [
-    ("cold_open", "Cold Open"),
-    ("intro", "Introduction"),
+    ("opener", "Opener"),
     ("ai_updates", "AI Updates"),
     ("funding", "Funding & Business"),
     ("india_tech", "India Tech"),
@@ -105,12 +103,17 @@ _SYSTEM_PROMPT = """You are the script writer for "NewsFlow" — a daily AI tech
 Write for a single host narrating to a listener who's a software engineer building product awareness.
 
 Voice guidelines:
-- Conversational, like a sharp colleague briefing you over coffee
-- Use verbal signposts: "First up...", "Now here's where it gets interesting...", "Moving on to..."
-- Short sentences. Active voice. No jargon without a quick explanation.
+- Sound like a sharp, opinionated tech journalist — not a newsreader. Have a point of view.
+- Use varied, concrete hooks at transitions: "Here's what nobody's talking about...", "This one surprised me...", "Okay, so here's the thing...", "Let me put this in perspective..."
+- After each P0 story, give a reaction or take: "Here's why this matters more than the headline...", "The interesting part isn't X — it's Y."
+- Drop one rhetorical question or aside per major segment to break the pace: "Think about what that actually means for teams shipping today."
+- Short punchy sentences on key points. Longer conversational sentences for context. Vary the rhythm.
+- Active voice. No jargon without a quick plain-English follow-up.
 - For SSML: wrap pauses as <break time="500ms"/>
 - End each P0 story with: "If someone asks you about this in an interview, here's your edge: [INTERVIEW EDGE insight]"
-- Quick hits: rapid-fire, "In quick hits today: [story 1]. [story 2]. [story 3]."
+- Quick hits: rapid-fire with energy, "In quick hits: [story 1]. [story 2]. [story 3]."
+- You may editorialize on the *implications* of facts in the summaries — what it means, why it matters, what changes. Never invent new facts, names, numbers, or quotes.
+- BREVITY IS A FEATURE. If a story doesn't yield a crisp PM takeaway in 2 sentences, move on. A well-covered 3-minute story should be 3 minutes — not padded to 6. Target total episode ~45 minutes.
 
 CRITICAL — Factual grounding: Only use facts, names, product names, statistics, and quotes
 that appear in the article summaries provided. Do not invent, extrapolate, or add any fact
@@ -143,27 +146,19 @@ class ScriptWriterAgent:
         grouped = self._group_by_segment(summaries)
         formatted_date = self._format_date(date)
 
-        # Top 3 summaries sorted by priority — used for intro preview regardless of
-        # category routing (intro has no dedicated category, so it would otherwise
-        # receive an empty list and fall back to a placeholder).
-        top_for_intro = sorted(
-            summaries,
-            key=lambda s: (_PRIORITY_RANK.get(s.priority.value, 4), -s.word_count),
-        )[:3]
-
         segments: list[Segment] = []
         generated_plain_texts: list[str] = []
 
-        # Segments that always run (synthesize from all_summaries, no articles needed)
-        _ALWAYS_GENERATE = {"cold_open", "intro", "closing"}
+        # Segments that always run even with no routed articles
+        _ALWAYS_GENERATE = {"opener", "closing"}
 
         for seg_id, seg_title in _SEGMENT_ORDER:
             seg_summaries = grouped.get(seg_id, [])
 
-            # Intro always uses top-3 by priority — no category routes here so
-            # using grouped would give an empty list and trigger a placeholder.
-            if seg_id == "intro":
-                seg_summaries = top_for_intro
+            # Opener receives no article summaries — it builds a section-preview
+            # from all_summaries via _build_segment_prompt special handling.
+            if seg_id == "opener":
+                seg_summaries = []
 
             # Skip content segments with no articles — avoids LLM hallucinating invented stories
             if not seg_summaries and seg_id not in _ALWAYS_GENERATE:
@@ -234,10 +229,6 @@ class ScriptWriterAgent:
 
         grouped = self._group_by_segment(summaries)
         formatted_date = self._format_date(date)
-        top_for_intro = sorted(
-            summaries,
-            key=lambda s: (_PRIORITY_RANK.get(s.priority.value, 4), -s.word_count),
-        )[:3]
 
         seg_by_type = {seg.segment_type: seg for seg in script.segments}
         new_segments: list[Segment] = []
@@ -253,7 +244,7 @@ class ScriptWriterAgent:
                 generated_plain_texts.append(orig.content_plain)
                 continue
 
-            seg_summaries = top_for_intro if seg_id == "intro" else grouped.get(seg_id, [])
+            seg_summaries = [] if seg_id == "opener" else grouped.get(seg_id, [])
             if not seg_summaries:
                 orig = seg_by_type[seg_id]
                 new_segments.append(orig)
@@ -530,6 +521,7 @@ Articles:
     def _get_segment_opener(self, seg_id: str) -> str:
         """Return the verbal signpost that opens a segment (used in multi-call parts)."""
         openers = {
+            "opener": "Open with: \"Hey, welcome to today's episode of NewsFlow.\"",
             "ai_updates": "Open with: \"Let's start with what's new in tech and AI...\"",
             "funding": "Open with: \"Moving on to funding and business news...\"",
             "india_tech": "Open with: \"Now, a look at what's happening in India tech...\"",
@@ -537,6 +529,29 @@ Articles:
             "quick_hits": "Open with: \"In quick hits today:\"",
         }
         return openers.get(seg_id, f"Begin the {seg_id} segment.")
+
+    def _build_opener_section_map(self, all_summaries: list[ArticleSummary]) -> str:
+        """Build a section-wise article title preview for the opener segment."""
+        section_order = [
+            ("ai_updates", "AI & big tech"),
+            ("funding", "Funding"),
+            ("india_tech", "India tech"),
+            ("product_strategy", "Product & strategy"),
+            ("quick_hits", "Quick hits"),
+        ]
+        section_tops: dict[str, list[str]] = {}
+        for s in all_summaries:
+            seg = _CATEGORY_TO_SEGMENT.get(s.category)
+            if seg and seg in {sid for sid, _ in section_order}:
+                if len(section_tops.get(seg, [])) < 2:
+                    section_tops.setdefault(seg, []).append(s.title)
+
+        lines = []
+        for seg_id, label in section_order:
+            titles = section_tops.get(seg_id, [])
+            if titles:
+                lines.append(f"  {label}: {' / '.join(titles)}")
+        return "\n".join(lines) if lines else "  (no articles available)"
 
     def _generate_segment_single(
         self,
@@ -624,8 +639,29 @@ Articles:
         all_summaries: list[ArticleSummary],
         prior_plain_texts: list[str],
     ) -> str:
-        # For segments with no routed articles (cold_open, intro, closing), fall back to
-        # top 5 from all_summaries — prevents the model from hallucinating invented stories.
+        instructions = self._segment_instructions(seg_id, formatted_date, all_summaries, prior_plain_texts)
+
+        # Opener uses a section-title map, not full article summaries
+        if seg_id == "opener":
+            section_map = self._build_opener_section_map(all_summaries)
+            return f"""Write the "Opener" segment for today's NewsFlow podcast.
+
+{instructions}
+
+Section topics available today (paraphrase — do not list titles verbatim):
+{section_map}
+
+Return ONLY this JSON object:
+{{
+  "id": "{uuid.uuid4()}",
+  "segment_type": "opener",
+  "content_ssml": "WRITE THE OPENER HERE using <break time=\\"500ms\\"/> for pauses",
+  "content_plain": "WRITE THE SAME OPENER HERE but with no SSML tags",
+  "duration_estimate_sec": 40,
+  "source_article_ids": []
+}}"""
+
+        # For all other segments with no routed articles (closing), fall back to top 5
         effective_summaries = summaries if summaries else all_summaries[:5]
 
         summaries_json = json.dumps(
@@ -643,8 +679,6 @@ Articles:
             ],
             indent=2,
         )
-
-        instructions = self._segment_instructions(seg_id, formatted_date, all_summaries, prior_plain_texts)
 
         return f"""Write the "{seg_title}" segment for today's NewsFlow podcast ({formatted_date}).
 
@@ -672,80 +706,74 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
         all_summaries: list[ArticleSummary],
         prior_plain_texts: list[str],
     ) -> str:
-        top_titles = [s.title for s in all_summaries[:3]]
-
         expand = getattr(self, "_expansion_mode", False)
 
         instructions = {
-            "cold_open": (
-                "Duration: ~30 seconds. Hook the listener with the single most interesting story from "
-                "TODAY'S articles. Base the hook STRICTLY on one of the provided article summaries — "
-                "do not invent product names, statistics, or facts not in the summaries. "
-                "Pick the most compelling story and paraphrase its summary in 2-3 punchy sentences. "
-                "End with: 'That and more, coming up.'"
-            ),
-            "intro": (
-                f"Duration: ~2 minutes. Start: 'Good morning! It's {formatted_date}.' "
-                f"Preview these top 3 stories: {top_titles}. "
-                "Tell the listener what they'll learn today. Keep it energetic."
+            "opener": (
+                "Duration: <=45 seconds (~110 words max). "
+                "Open naturally: 'Hey, welcome to today's episode of NewsFlow.' "
+                "Do NOT mention the date. Then in one flowing paragraph, preview each section "
+                "by paraphrasing its 1-2 key topics. Order: AI & big tech, funding, India tech, "
+                "product strategy, quick hits. Skip any section with zero articles. "
+                "Each section preview is 1 sentence max — tease, do not explain or deep-dive. "
+                "End with a short energy line like 'Let's get into it.' "
+                "Strictly base previews on the section topics provided below. Do not invent."
             ),
             "ai_updates": (
-                "Duration: 20-30 minutes. Cover P0 stories first (deep dive 5-7 min each), then P1. "
+                "Duration: 15-18 minutes. "
+                "P0 stories: deep dive, 3-4 minutes each (what happened → technical angle → PM takeaway + INTERVIEW EDGE). Cover max 3 P0 stories. "
+                "P1 stories: 60-90 seconds each (what happened in 2-3 sentences + 1 crisp PM takeaway). "
+                "P2 stories: skip — they belong in quick_hits. "
                 + (
-                    "EXPANSION MODE: Treat P1 stories with full depth too — add INTERVIEW EDGE and technical angle for EVERY story. "
-                    "Target 30+ min total for this segment. "
-                    if expand else
-                    ""
+                    "EXPANSION MODE — a P0 article was missed in the first pass. Cover it now with full depth: "
+                    "CORE NEWS + technical angle + PM INTERVIEW EDGE. Keep other stories at their current depth. "
+                    if expand else ""
                 )
-                + "Covers big tech launches, AI products, and standout product innovations. "
-                "Use signpost: 'Let's start with what's new in tech and AI...' "
-                "End EVERY story (P0 and P1) with the INTERVIEW EDGE insight."
+                + "Use signpost: 'Let's start with what's new in tech and AI...' "
+                "End EVERY P0 story with the INTERVIEW EDGE insight. Move on once the key insight is clear."
             ),
             "funding": (
-                "Duration: 10-15 minutes. Cover investment news, M&A, valuations. "
+                "Duration: 6-8 minutes. "
+                "Cover top 3-4 funding rounds: round size + lead backer → what valuation implies → one PM insight. "
+                "1 minute per story max. If more rounds exist, name them in one quick-list sentence at the end. "
                 + (
-                    "EXPANSION MODE: For each funding story explain what the round means for the ecosystem, "
-                    "who the backers are, what the valuation implies, and what a PM should know. Target 15-20 min. "
+                    "EXPANSION MODE — cover any missed funding story now. Add: what the round signals for the ecosystem + PM angle. "
                     if expand else ""
                 )
                 + "Use signpost: 'Moving on to funding and business news...'"
             ),
             "india_tech": (
-                "Duration: 5-10 minutes. India-focused startup and tech stories. "
+                "Duration: 4-5 minutes. India-focused startup and tech stories. "
+                "ALWAYS render this section — never skip it, even if only 1-2 stories. "
+                "If thin: cover 1-2 stories at normal depth. Do not pad or invent context. "
                 + (
-                    "EXPANSION MODE: Go deeper on each story — include founder background, market context, and PM interview angle. Target 10-15 min. "
+                    "EXPANSION MODE — cover any missed India story now with full context: company + what happened + market angle. "
                     if expand else ""
                 )
-                + "Use signpost: 'Now, a look at what's happening in India tech...' "
-                "Skip gracefully if no articles: 'Nothing major in India tech today.'"
+                + "Use signpost: 'Now, a look at what's happening in India tech...'"
             ),
             "product_strategy": (
-                "Duration: 10-15 minutes. Industry strategy, SaaS disruption, Series B+ moves. "
+                "Duration: 5-7 minutes. Industry strategy, SaaS disruption, Series B+ moves. "
+                "Top 2-3 stories: strategic move → who wins/loses → one PM decision framework angle. "
+                "Keep punchy — strategy stories land better as crisp insights than long explanations. "
                 + (
-                    "EXPANSION MODE: For each story explain the business model angle, who wins/loses, and strategic implications. Target 15-20 min. "
+                    "EXPANSION MODE — cover any missed strategy story now. Focus on the business model angle and PM takeaway. "
                     if expand else ""
                 )
-                + "Use signpost: 'Time for product and strategy...' "
-                "Make connections to what engineers at Series B+ startups should know."
+                + "Use signpost: 'Time for product and strategy...'"
             ),
             "quick_hits": (
-                "Duration: 5-10 minutes. Rapid-fire P2 stories (policy, safety, engineering). "
+                "Duration: 3-4 minutes. Rapid-fire — one-liner per story: title paraphrase + one sentence on why it matters. "
+                "No interview edges here, no deep dives. Move fast. "
                 + (
-                    "EXPANSION MODE: Give each story 2-3 sentences instead of 1. Target 10-12 min. "
+                    "EXPANSION MODE — give each story 2 sentences max. No more. "
                     if expand else ""
                 )
-                + "Start: 'In quick hits today:' then cover each story. "
-                "Keep energy high, move fast."
+                + "Start: 'In quick hits today:' then cover each story. Keep energy high."
             ),
             "closing": (
-                "Duration: 3-5 minutes. Wrap up with '3 things to remember from today'. "
-                + (
-                    "EXPANSION MODE: Recap 4-5 stories instead of 3. For each, give: what happened, "
-                    "why it matters for the AI product landscape, and one PM takeaway the listener "
-                    "can use in an interview. Target 8-10 min. "
-                    if expand else ""
-                )
-                + "Reference the strongest stories and their interview edges. "
+                "Duration: 2-3 minutes. '3 things to remember from today' — one sentence each. "
+                "Reference the strongest P0 stories and their interview edges. "
                 "End with: 'That's your NewsFlow for today. Stay sharp. See you tomorrow.'"
             ),
         }
@@ -754,6 +782,29 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
     # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
+
+    def regenerate_segment(
+        self,
+        seg_id: str,
+        summaries: list[ArticleSummary],
+        date: str,
+        all_summaries: list[ArticleSummary] | None = None,
+    ) -> Segment:
+        """Public method: regenerate a single segment (used by ScriptValidatorAgent)."""
+        self._expansion_mode = False
+        self._coverage_gaps = []
+        formatted_date = self._format_date(date)
+        seg_title = {sid: title for sid, title in _SEGMENT_ORDER}.get(seg_id, seg_id.replace("_", " ").title())
+        effective_all = all_summaries if all_summaries is not None else summaries
+        return self._generate_segment(
+            seg_id=seg_id,
+            seg_title=seg_title,
+            summaries=summaries,
+            date=date,
+            formatted_date=formatted_date,
+            all_summaries=effective_all,
+            prior_plain_texts=[],
+        )
 
     def _group_by_segment(self, summaries: list[ArticleSummary]) -> dict[str, list[ArticleSummary]]:
         groups: dict[str, list[ArticleSummary]] = {seg_id: [] for seg_id, _ in _SEGMENT_ORDER}

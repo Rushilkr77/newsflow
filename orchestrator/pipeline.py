@@ -34,6 +34,7 @@ import structlog
 from agents.audio_producer import AudioProducerAgent
 from agents.curator import CuratorAgent
 from agents.ingestion import IngestionAgent
+from agents.script_validator import ScriptValidatorAgent
 from agents.script_writer import ScriptWriterAgent
 from agents.summarizer import SummarizerAgent
 from models.article import ArticleSummary, CuratedArticle, RawArticle
@@ -331,47 +332,31 @@ def _write_log(path: str, lines: list[str]) -> None:
 
 def _find_coverage_gaps(script: PodcastScript, summaries: list[ArticleSummary]) -> dict:
     """
-    Detect P0/P1 articles that were skipped or have thin coverage in the script.
+    Detect P0 articles completely skipped from narration.
 
-    "Skipped" = article title keywords not found anywhere in the narrated text.
-    "Undercovered" = P0 article whose summary contains rich structured sections
-      (CORE NEWS, SURROUNDING IMPACT, HOW IT WORKS, PM INTERVIEW EDGE) but may
-      not have been fully narrated — flagged for expansion pass.
+    Only P0 articles trigger expansion — missing P1/P2 is acceptable under brevity targets.
+    The undercovered bucket (checking summary_text section markers) was a structural
+    false-positive that fired every day for rich P0 summaries; removed.
 
-    Returns {"skipped": [...article_ids], "undercovered": [...article_ids]}
-    NOTE: source_article_ids on segments records what went IN to the LLM, not
-    what was actually narrated. This function uses content_plain text search instead.
+    Returns {"skipped": [...article_ids], "undercovered": []}
+    NOTE: source_article_ids records what went IN to the LLM, not what was narrated.
+    Uses content_plain text search for reliable detection.
     """
     all_plain_text = " ".join(s.content_plain.lower() for s in script.segments)
 
     skipped: list[str] = []
-    undercovered: list[str] = []
 
     for summary in summaries:
-        if summary.priority not in (Priority.P0, Priority.P1):
+        if summary.priority != Priority.P0:
             continue
 
-        # Check if meaningful title words appear anywhere in the narrated text
         title_words = [w.lower() for w in summary.title.split() if len(w) > 4]
         mentioned = any(w in all_plain_text for w in title_words[:3])
 
         if not mentioned:
             skipped.append(summary.article_id)
-        elif summary.priority == Priority.P0:
-            # P0 is mentioned but check if its rich summary content was narrated.
-            # A P0 summary has 6 sections; if ≥3 key sections are present in the
-            # summary text, there's rich material that should be narrated in depth.
-            sections_present = sum(
-                1 for marker in [
-                    "CORE NEWS", "SURROUNDING IMPACT", "HOW IT WORKS", "PM INTERVIEW EDGE"
-                ]
-                if marker in summary.summary_text.upper()
-            )
-            if sections_present >= 3:
-                # Rich summary available — flag for targeted expansion coverage check
-                undercovered.append(summary.article_id)
 
-    return {"skipped": skipped, "undercovered": undercovered}
+    return {"skipped": skipped, "undercovered": []}
 
 
 # ── Expansion diff helper ──────────────────────────────────────────────────────
@@ -582,6 +567,27 @@ class NewsFlowPipeline:
                 log.info("audio_checkpoint_cleared", reason="script_regenerated")
 
         _write_script_trace(script, logs_dir)
+
+        # ── Stage 4b: Script Validation (dedup) ─────────────────────────────
+        # Only run on freshly generated/expanded scripts; skip if loading from checkpoint
+        # (validation was already applied and the script file already reflects it).
+        validation_report_path = os.path.join(logs_dir, "validation_report.json")
+        if not script_from_checkpoint:
+            script, validation_report = ScriptValidatorAgent().run(script, summaries, date)
+            with open(validation_report_path, "w", encoding="utf-8") as f:
+                json.dump(validation_report, f, indent=2, default=str)
+            log.info(
+                "script_validation_complete",
+                converged=validation_report["converged"],
+                iterations=validation_report["iterations_run"],
+                final_offenders=validation_report["final_offender_count"],
+            )
+            if validation_report["iterations_run"] > 0:
+                # Validator changed segments — re-save script and clear audio checkpoint
+                _save_json(script, script_path)
+                if Path(metadata_path).exists():
+                    os.remove(metadata_path)
+                    log.info("audio_checkpoint_cleared", reason="script_validated")
 
         # ── Stage 5: Audio Production ────────────────────────────────────────
         # Unload Ollama model from VRAM before TTS — frees GPU memory for F5-TTS/Chatterbox.

@@ -26,14 +26,15 @@ Read these files in order and report counts at each stage:
 |-----------|------|--------|
 | `raw_articles.json` | Count total + count per source | "X articles from Y sources" |
 | `curated_articles.json` | Count P0/P1/P2/P3 per category | Priority breakdown table |
-| `curated_articles_enriched.json` | Count where full_text is not null | "X of Y articles scraped successfully" |
+| `curated_articles_enriched.json` | Full scrape analysis — see Step 2b | Fetch source breakdown |
 | `summaries.json` | Count total summaries | Should match P0+P1+P2 count |
-| `podcast_script.json` | Count segments, total_estimated_duration_min | Duration vs 40-50 min target |
+| `podcast_script.json` | Count segments, total_estimated_duration_min | Duration vs 40-90 min target |
 
-**Expected funnel** (from DESIGN.md):
+**Expected funnel:**
 - Raw: 60-80 articles
 - Curated: 25-35 articles (P0: ≤6, P1: ≤12, P2: ≤15)
-- Scraper success: >60% of P0+P1 articles
+- P0+P1 full-text scraped: >80% (flag if <60%)
+- Snippet-only P0: 0 (any is a quality risk — flag by name)
 - Summaries: same count as curated P0+P1+P2
 - Episode: **40-90 minutes** (from `preferences.yaml` `time_budget.target_duration_min: 90`, min: 40)
 
@@ -56,7 +57,7 @@ For each snippet-only P0/P1 article, list: `[P0] Title (source)` — these are c
 
 Also check `workspace/{date}/logs/3_summarization.txt` if it exists — it has per-article
 content source labels ("TRAFILATURA — N chars" vs "snippet only") which map fallback chain.
-Count: `primary: N | inc42: N | ddg: N | snippet-only: N` from the log if available.
+Count: `primary: N | ddg: N | snippet-only: N` from the log if available.
 
 ## Step 3 — Summary quality spot-check
 
@@ -77,9 +78,7 @@ For each, report:
 | P1 | 100-200 | 2 | 1 |
 | P2 | 30-50 | 1 | 0 |
 
-Also check: does the summary sound like it was written for ears (short sentences, no bullet points in the text itself)?
-
-**Structured header check** — the summarizer produces section headers in `summary_text`. Count how many are present per priority tier:
+**Structured header check** — count section headers in `summary_text` per priority tier:
 
 | Priority | Required headers | Min expected |
 |---------|-----------------|--------------|
@@ -87,11 +86,11 @@ Also check: does the summary sound like it was written for ears (short sentences
 | P1 | CORE NEWS + IMPACT, HOW + WHY, PM EDGE | 3 |
 | P2 | CORE NEWS, PM EDGE | 2 |
 
-Flag any summary where the header count falls below the minimum — this indicates a token budget or scraping issue (summarizer didn't produce the full structured output).
+Flag any summary where header count falls below minimum.
 
 ## Step 4 — Script quality check
 
-From `podcast_script.json`, check:
+From `podcast_script.json`:
 
 1. **Duration**: `total_estimated_duration_min` — flag if outside **40-90 min**
    - Targets from `preferences.yaml`: `target_duration_min: 90`, `min_duration_min: 40`
@@ -118,50 +117,50 @@ From `curated_articles.json`, verify each enabled source contributed at least 1 
 - `et_ai` — expected daily
 - `harper_carroll` — weekly (Wed/Thu only; skip check Mon/Tue/Fri/Sat/Sun)
 
-If any daily source has 0 articles, flag it as a likely parser or Gmail fetch issue.
+If any daily source has 0 articles, flag as likely parser or Gmail fetch issue.
 
-## Step 5b — Expansion quality report
+## Step 5b — Expansion / Coverage report
 
 Check for `workspace/{date}/logs/expansion_diff.json`.
 
-**If the file does not exist**: expansion was not triggered (episode met duration target on first pass). Report: `Expansion: not triggered`.
+**If file does not exist**: expansion was not triggered. Report: `Expansion: not triggered`.
 
-**If the file exists**, read it. Its structure is:
+**If file exists**, read it. Report:
+1. Duration gain: pre → post (+N min)
+2. Gap resolution: gaps_before → gaps_after; list gaps_filled and gaps_remaining
+3. Per-segment delta for expanded segment only (expansion is now localized)
+4. Trigger: gap-driven only (P0 article skipped from narration)
+5. Flag if gaps_remaining > 0 (cross-check article titles in curated_articles.json — may be paraphrase false-positive)
 
-```json
-{
-  "pre_expansion":  { "duration_min": N, "segments": { "segment_type": { "duration_sec": N, "article_ids": [...], "char_count": N }, ... }, "gaps": { "article_id": true, ... } },
-  "post_expansion": { "duration_min": N, "segments": { ... }, "gaps": { ... } },
-  "summary": {
-    "gaps_before": N,
-    "gaps_after": N,
-    "gaps_filled": ["article_id_1", ...],
-    "gaps_remaining": ["article_id_2", ...],
-    "duration_gain_min": N
-  }
-}
-```
+Note: `undercovered` bucket no longer used. Only `skipped` P0 articles trigger expansion.
 
-Report all of these:
+## Step 5c — Dedup Validation report
 
-1. **Duration gain**: `pre_expansion.duration_min` → `post_expansion.duration_min` (+`summary.duration_gain_min` min)
-2. **Gap resolution**:
-   - `summary.gaps_before` gaps before expansion → `summary.gaps_after` gaps after
-   - `gaps_filled`: list article IDs that are now narrated (✓ covered by expansion)
-   - `gaps_remaining`: list article IDs still uncovered — **FLAG each one** as a content gap that survived expansion
-3. **Per-segment duration delta**: for each segment present in both pre and post snapshots, compute:
-   - `post_expansion.segments[seg].duration_sec - pre_expansion.segments[seg].duration_sec`
-   - Report as `+Ns` gain or `unchanged`
-   - Flag any segment with zero delta (expansion added no content to it)
-4. **Expansion quality verdict**:
-   - `gaps_remaining == 0` → ✓ all articles covered after expansion
-   - `gaps_remaining > 0` → ✗ ISSUE: expansion did not cover all articles; list the IDs and look up their titles in `curated_articles.json`
+Read `workspace/{date}/logs/validation_report.json` (if exists):
 
-**Note on `gaps_remaining`**: These are articles whose titles weren't found verbatim in `content_plain` after expansion. Can be a false positive when the script paraphrases. Cross-reference against `curated_articles.json` titles to judge severity before flagging.
+Report:
+- Offenders detected in first pass (articles in 2+ deep segments)
+- Regenerations performed (segment IDs + iteration count)
+- Final offender count — 0 = pass, >0 = "dedup did not converge" ISSUE
+- History of each iteration
 
-**Expansion trigger reason** — determine from `summary.gaps_before`:
-- **Gap-driven**: `gaps_before > 0` → specific articles were missing from narration before expansion
-- **Duration-driven**: `gaps_before == 0` but expansion ran → episode was short, added depth to existing coverage
+If file does not exist: "validation not run (script loaded from checkpoint)".
+
+## Step 5d — Tighten-pass report
+
+Read `workspace/{date}/logs/tighten_diff.json` (if exists):
+
+If exists: report pre/post duration, which P1/P2 stories were compressed. Label as `tighten-pass applied` — this is expected behavior, not a failure.
+
+If not exists: report "tighten-pass: not needed".
+
+## Step 5e — Audio cleanup report
+
+Parse `workspace/{date}/logs/pipeline.log` for `audio_cleanup_applied` and `audio_cleanup_fallback` events:
+
+- Report: cleanup enabled/disabled, noise-reduce + highpass applied per segment
+- Flag if cleanup fell back to highpass-only on >1 segment (noisereduce import issue)
+- Flag if `audio_cleanup_disabled` appears (config disabled)
 
 ## Step 6 — Output the quality report
 
@@ -173,7 +172,7 @@ Format:
 Raw: X | Curated: X (P0:X P1:X P2:X P3:X) | Summaries: X | Duration: X min
 
 ### Content Fetch Quality
-Fetch source:  primary: X | inc42: X | ddg: X | snippet-only: X
+Fetch source:  primary: X | ddg: X | snippet-only: X
 P0 (N):  scraped: X ✓  thin: Y ⚠  snippet-only: Z ✗
 P1 (N):  scraped: X ✓  thin: Y ⚠  snippet-only: Z ✗
 [list snippet-only P0/P1 articles with source]

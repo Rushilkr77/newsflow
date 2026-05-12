@@ -31,6 +31,7 @@ pydub>=0.25
 pyloudnorm>=0.1.1
 scipy>=1.11                # wav array conversion for Chatterbox/F5-TTS output
 numpy>=1.24                # audio sample manipulation
+noisereduce>=3.0           # spectral noise reduction for Chatterbox output
 
 # Logging
 structlog>=24.0

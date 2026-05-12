@@ -46,11 +46,16 @@ _FALLBACK_CFG: dict = _TTS_CFG.get("fallback", {})
 _OUTPUT_CFG: dict = _TTS_CFG.get("output", {})
 
 _SILENCE_BETWEEN_SEGMENTS_MS: int = _OUTPUT_CFG.get("silence_between_segments_ms", 1500)
-_SILENCE_BETWEEN_ARTICLES_MS: int = _OUTPUT_CFG.get("silence_between_articles_ms", 800)
+_SILENCE_BETWEEN_ARTICLES_MS: int = _OUTPUT_CFG.get("silence_between_articles_ms", 150)
 _NORMALIZE_LOUDNESS: bool = _OUTPUT_CFG.get("normalize_loudness", True)
 _TARGET_LUFS: float = float(_OUTPUT_CFG.get("target_lufs", -16))
 _OUTPUT_FORMAT: str = _OUTPUT_CFG.get("format", "mp3")
 _OUTPUT_BITRATE: str = str(_OUTPUT_CFG.get("bitrate", "128k"))
+
+_CLEANUP_CFG: dict = _TTS_CFG.get("cleanup", {})
+_CLEANUP_ENABLED: bool = _CLEANUP_CFG.get("enabled", True)
+_NOISE_REDUCE_PROP: float = float(_CLEANUP_CFG.get("noise_reduce_prop", 0.75))
+_HIGHPASS_HZ: int = int(_CLEANUP_CFG.get("highpass_hz", 80))
 
 # Max chars per TTS call per provider (from tts_config.yaml)
 _CHATTERBOX_MAX_CHARS: int = _PRIMARY_CFG.get("params", {}).get("max_chars_per_call", 300)
@@ -301,11 +306,11 @@ class AudioProducerAgent:
 
         duration_sec = len(full_audio) // 1000
 
-        # Duration quality checks
-        if duration_sec < 1800:  # < 30 min
-            log.warning("episode_too_short", duration_sec=duration_sec, min_expected_sec=1800)
-        elif duration_sec > 7200:  # > 120 min
-            log.warning("episode_too_long", duration_sec=duration_sec, max_expected_sec=7200)
+        # Duration quality checks (target 40-50 min)
+        if duration_sec < 1200:  # < 20 min — likely TTS failure
+            log.warning("episode_too_short", duration_sec=duration_sec, min_expected_sec=1200)
+        elif duration_sec > 4200:  # > 70 min
+            log.warning("episode_too_long", duration_sec=duration_sec, max_expected_sec=4200)
 
         episode_number = script.episode_number
         output_path = os.path.join(workspace, f"episode_{episode_number}.mp3")
@@ -354,8 +359,8 @@ class AudioProducerAgent:
         Route each segment to its designated TTS provider, then fall back if needed.
 
         Routing (from tts_config.yaml segment_routing, with hardcoded defaults):
-          Chatterbox — cold_open, intro, quick_hits, closing  (punchy/expressive)
-          F5-TTS     — ai_updates, funding, india_tech, product_strategy  (long-form prosody)
+          Chatterbox — opener, quick_hits, closing, ai_updates, funding, india_tech, product_strategy
+          F5-TTS     — (none by default; assign segments in tts_config.yaml to enable)
 
         Fallback chain: designated provider → other provider → gTTS
         """
@@ -405,6 +410,8 @@ class AudioProducerAgent:
             if not chunk.strip():
                 continue
             audio = self._chatterbox.synthesize(chunk)
+            audio = self._trim_silence(audio)
+            audio = self._clean_audio(audio)
             if parts:
                 parts.append(article_silence)
             parts.append(audio)
@@ -434,6 +441,8 @@ class AudioProducerAgent:
             if not chunk.strip():
                 continue
             audio = self._f5tts.synthesize(chunk)
+            audio = self._trim_silence(audio)
+            audio = self._clean_audio(audio)
             if parts:
                 parts.append(article_silence)
             parts.append(audio)
@@ -464,6 +473,54 @@ class AudioProducerAgent:
 
         self._active_provider = "gtts"
         return sum(parts[1:], parts[0])
+
+    # -------------------------------------------------------------------------
+    # Per-chunk silence trimming and noise cleanup
+    # -------------------------------------------------------------------------
+
+    def _trim_silence(self, audio: AudioSegment, threshold_db: float = -40.0, chunk_ms: int = 10) -> AudioSegment:
+        """Trim Chatterbox trailing/leading silence from each synthesized chunk."""
+        from pydub.silence import detect_leading_silence
+        start_trim = detect_leading_silence(audio, silence_threshold=threshold_db, chunk_size=chunk_ms)
+        end_trim = detect_leading_silence(audio.reverse(), silence_threshold=threshold_db, chunk_size=chunk_ms)
+        duration = len(audio)
+        if start_trim + end_trim >= duration:
+            return audio  # all silence — preserve as-is
+        return audio[start_trim : duration - end_trim]
+
+    def _clean_audio(self, audio: AudioSegment) -> AudioSegment:
+        """Spectral noise reduction + high-pass filter for Chatterbox static cleanup."""
+        if not _CLEANUP_ENABLED:
+            return audio
+        try:
+            import numpy as np
+            import noisereduce as nr
+
+            rate = audio.frame_rate
+            samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+            samples /= 2 ** (audio.sample_width * 8 - 1)
+
+            reduced = nr.reduce_noise(
+                y=samples,
+                sr=rate,
+                stationary=False,
+                prop_decrease=_NOISE_REDUCE_PROP,
+            )
+
+            reduced_int16 = (reduced * 32767).clip(-32768, 32767).astype(np.int16)
+            cleaned = audio._spawn(
+                reduced_int16.tobytes(),
+                overrides={"sample_width": 2, "frame_rate": rate, "channels": audio.channels},
+            )
+            cleaned = cleaned.high_pass_filter(_HIGHPASS_HZ)
+            log.debug("audio_cleanup_applied", noise_reduce_prop=_NOISE_REDUCE_PROP, highpass_hz=_HIGHPASS_HZ)
+            return cleaned
+        except ImportError:
+            log.warning("audio_cleanup_fallback", reason="noisereduce not installed — applying highpass only")
+            return audio.high_pass_filter(_HIGHPASS_HZ)
+        except Exception as e:
+            log.warning("audio_cleanup_failed", error=str(e))
+            return audio
 
     # -------------------------------------------------------------------------
     # Loudness normalization

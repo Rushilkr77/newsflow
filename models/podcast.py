@@ -6,7 +6,7 @@ class Segment(BaseModel):
     id: str
     title: str
     segment_type: str = Field(
-        description="cold_open | intro | ai_updates | funding | india_tech | product_strategy | quick_hits | closing"
+        description="opener | ai_updates | funding | india_tech | product_strategy | quick_hits | closing"
     )
     content_ssml: str = Field(description="SSML-annotated script text")
     content_plain: str = Field(description="Plain text (for TTS that don't support SSML)")

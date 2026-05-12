@@ -2,9 +2,9 @@ primary:
   provider: chatterbox
   model: ResembleAI/Chatterbox
   params:
-    cfgw: 0.5
-    exaggeration: 0.4
-    temperature: 0.7
+    cfgw: 0.6
+    exaggeration: 0.7
+    temperature: 0.6
     max_chars_per_call: 300
     voice_reference: "/Users/rushilkr/Downloads/voice_ref_morgan_combined.wav"
 
@@ -19,15 +19,8 @@ fallback:
   voice_reference_text: "When I was 17 years old I could throw a baseball 90 miles an hour. You don't have to leave this planet to tell a good story."
 
 segment_routing:
-  # Chatterbox: short/punchy segments (expressive, <300 chars/call)
   chatterbox:
-    - cold_open
-    - intro
-    - quick_hits
-    - closing
-  chatterbox:
-    - cold_open
-    - intro
+    - opener
     - quick_hits
     - closing
     - ai_updates
@@ -36,11 +29,16 @@ segment_routing:
     - product_strategy
   f5_tts: []
 
+cleanup:
+  enabled: true
+  noise_reduce_prop: 0.75
+  highpass_hz: 80
+
 output:
   format: mp3
   bitrate: 128k
   sample_rate: 44100
   silence_between_segments_ms: 1500
-  silence_between_articles_ms: 800
+  silence_between_articles_ms: 150
   normalize_loudness: true
   target_lufs: -16
