@@ -12,7 +12,7 @@ import trafilatura
 log = structlog.get_logger(__name__)
 
 _SEARCH_URL = "https://inc42.com/?s={query}"
-_REQUEST_TIMEOUT = 5  # seconds
+_REQUEST_TIMEOUT = 8  # seconds — increased from 5 (Inc42 search can be slow)
 _MIN_ARTICLE_CHARS = 150
 
 _HEADERS = {
@@ -23,8 +23,9 @@ _HEADERS = {
     )
 }
 
-# URL path segments that indicate real article pages (not tag/category pages)
-_VALID_PATH_SEGMENTS = ("/features/", "/news/", "/buzz/")
+# URL path segments that indicate real article pages (not tag/category pages).
+# /startups/ added: Inc42 uses it for funding/M&A stories (e.g. inc42.com/startups/news/…).
+_VALID_PATH_SEGMENTS = ("/features/", "/news/", "/buzz/", "/startups/")
 
 
 class Inc42Scraper:
@@ -38,7 +39,7 @@ class Inc42Scraper:
         try:
             article_url = self._find_article_url(title)
             if not article_url:
-                log.debug("inc42_no_result", title=title[:60])
+                log.info("inc42_no_result", title=title[:60])
                 return None
 
             text = self._scrape_url(article_url)
@@ -93,6 +94,13 @@ class Inc42Scraper:
                 href = link["href"]
                 if self._is_valid_article_url(href):
                     return href
+
+        # Strategy 3: any <a href> on the page matching a valid Inc42 article URL.
+        # Catches layout changes where results aren't wrapped in <article>/<h2>.
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"]
+            if self._is_valid_article_url(href):
+                return href
 
         return None
 
