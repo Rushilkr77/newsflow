@@ -9,11 +9,12 @@
       "Bash(pip install:*)",
       "Bash(ollama list:*)",
       "WebFetch(domain:costgoat.com)",
-      "WebFetch(domain:openrouter.ai)"
+      "WebFetch(domain:openrouter.ai)",
+      "mcp__code-review-graph__semantic_search_nodes_tool"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "code-review-graph"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
