@@ -46,7 +46,14 @@ _OPENROUTER_SUMMARIZER_MODELS: list[str] = [
 # Sources whose articles are typically behind the ET paywall
 _ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
 
-_inc42_scraper = Inc42Scraper()
+# India-specific scrapers tried in order for paywalled ET articles.
+# Each uses DDG site: search to bypass the site's own blocked search endpoint.
+_INDIA_SCRAPERS: list[Inc42Scraper] = [
+    Inc42Scraper("inc42.com",     ("/features/", "/news/", "/buzz/", "/startups/")),
+    Inc42Scraper("yourstory.com", ("/stories/", "/startup/", "/tech/", "/companies/",
+                                   "/2024/", "/2025/", "/2026/")),
+    Inc42Scraper("entrackr.com",  ("/story/", "/news/")),
+]
 _ddg_scraper = DDGScraper()
 
 
@@ -107,18 +114,23 @@ class SummarizerAgent:
                 continue
 
             if article.source in _ET_SOURCES:
-                # ET articles are paywalled — search inc42 first (India tech coverage)
-                inc42_text = _inc42_scraper.search_and_fetch(article.title)
-                if inc42_text:
-                    article.full_text = inc42_text
-                    log.info(
-                        "inc42_fallback_used",
-                        article_id=article.id,
-                        title=article.title[:60],
-                        chars=len(inc42_text),
-                    )
+                # ET articles are paywalled — try India tech sites in priority order
+                # (inc42 → yourstory → entrackr) before falling back to general DDG.
+                for scraper in _INDIA_SCRAPERS:
+                    india_text = scraper.search_and_fetch(article.title)
+                    if india_text:
+                        article.full_text = india_text
+                        log.info(
+                            "india_fallback_used",
+                            site=scraper._site,
+                            article_id=article.id,
+                            title=article.title[:60],
+                            chars=len(india_text),
+                        )
+                        break
+                if article.full_text:
                     continue
-                # inc42 missed it — fall through to DDG below
+                # All India sites missed it — fall through to general DDG
 
             # General DDG fallback for all sources (inc42 miss or non-ET source)
             ddg_text = _ddg_scraper.search_and_fetch(article.title, skip_domain=skip_domain)

@@ -35,7 +35,7 @@ Read these files in order and report counts at each stage:
 - Curated: 25-35 articles (P0: ≤6, P1: ≤12, P2: ≤15)
 - Scraper success: >60% of P0+P1 articles
 - Summaries: same count as curated P0+P1+P2
-- Episode: **40-50 minutes** (estimated duration after _CHARS_PER_SEC=19 calibration)
+- Episode: **40-90 minutes** (from `preferences.yaml` `time_budget.target_duration_min: 90`, min: 40)
 
 Flag any stage where numbers fall outside expected range.
 
@@ -93,10 +93,11 @@ Flag any summary where the header count falls below the minimum — this indicat
 
 From `podcast_script.json`, check:
 
-1. **Duration**: `total_estimated_duration_min` — flag if outside **40-50 min**
-   - Note: estimated duration uses `_CHARS_PER_SEC=19` (Chatterbox/ElevenLabs pace).
+1. **Duration**: `total_estimated_duration_min` — flag if outside **40-90 min**
+   - Targets from `preferences.yaml`: `target_duration_min: 90`, `min_duration_min: 40`
+   - Estimated duration uses `_CHARS_PER_SEC=19` (Chatterbox/F5-TTS pace, calibrated 2026-05-12).
      At 19 chars/sec the estimate should closely match actual audio. Cross-check with
-     `duration_sec` in `episode.json` (actual audio) if it exists.
+     `duration_sec` in `episode_metadata.json` (actual audio) if it exists.
 2. **Segment coverage**: Are all expected segment types present?
    - Required: `cold_open`, `intro`, `ai_updates`, `closing`
    - Expected: at least 3 of `funding_ma`, `india_tech`, `product_strategy`, `quick_hits`
@@ -188,7 +189,7 @@ P1 "{title}": 87 words ✗ (target 100-200)
 P2 "{title}": 41 words ✓
 
 ### Script Quality
-Duration: 47 min ✓  (target 40-50 min)
+Duration: 47 min ✓  (target 40-90 min)
 Segments: cold_open ✓ intro ✓ ai_updates ✓ funding_ma ✓ india_tech ✗ product_strategy ✓ quick_hits ✓ closing ✓
 Top takeaways: 3 ✓
 SSML present: ✓
