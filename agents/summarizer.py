@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+import requests
 import structlog
 
 from mcp_servers.article_fetcher_server import fetch_article_content
@@ -37,13 +38,16 @@ _OPENROUTER_SUMMARIZER_MODELS: list[str] = [
     m.strip()
     for m in os.getenv(
         "OPENROUTER_SUMMARIZER_MODELS",
-        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen3-8b:free,qwen/qwen-2.5-7b-instruct:free,meta-llama/llama-3.3-70b-instruct:free",
     ).split(",")
     if m.strip()
 ]
 
 # Sources whose email links hit a paywall — DDG finds the articleshow/ URL directly.
 _ET_SOURCES = frozenset({Source.ETTECH, Source.ET_AI})
+
+# ET articleshow URLs are freely scrapeable via trafilatura; scope DDG to this domain.
+_ET_SITE_SCOPE = "economictimes.indiatimes.com"
 
 _ddg_scraper = DDGScraper()
 
@@ -54,6 +58,26 @@ def _url_domain(url: str) -> str | None:
         return urlparse(url).netloc.lower().removeprefix("www.") or None
     except Exception:
         return None
+
+
+def _resolve_nltrack_url(url: str) -> str:
+    """Follow nltrack.indiatimes.com redirect to get the real articleshow URL.
+
+    Returns the resolved URL, or the original URL on any failure.
+    nltrack URLs are ET tracking redirects — the final destination is the
+    real article. We grab it to bypass the redirect chain that confuses trafilatura.
+    """
+    parsed = urlparse(url)
+    if "nltrack.indiatimes.com" not in parsed.netloc:
+        return url
+    try:
+        resp = requests.head(url, allow_redirects=True, timeout=5)
+        resolved = resp.url
+        if "articleshow" in resolved or "economictimes.indiatimes.com" in resolved:
+            return resolved
+    except Exception:
+        pass
+    return url
 
 
 class SummarizerAgent:
@@ -96,19 +120,39 @@ class SummarizerAgent:
 
         for article in to_fetch:
             url_str = str(article.url)
+            is_et = article.source in _ET_SOURCES
+
+            # For ET AI articles: nltrack.indiatimes.com is a tracking redirect.
+            # Resolve it first to get the actual articleshow URL for direct scraping.
+            if is_et:
+                url_str = _resolve_nltrack_url(url_str)
+
             skip_domain = _url_domain(url_str)
 
-            text = fetch_article_content(url_str)
-            if text and len(text) >= 200:
-                article.full_text = text
-                log.debug("article_fetched", article_id=article.id, chars=len(text))
-                continue
+            # Skip direct fetch for ettech placeholder URLs — they are intentionally
+            # not real URLs and will always fail. Go straight to DDG.
+            is_placeholder = "ettech.placeholder" in url_str
+            if not is_placeholder:
+                text = fetch_article_content(url_str)
+                if text and len(text) >= 200:
+                    article.full_text = text
+                    log.debug("article_fetched", article_id=article.id, chars=len(text))
+                    continue
 
-            # General DDG fallback for all sources.
-            # ET email redirect URLs hit a paywall, but DDG finds the articleshow/ URL
-            # which is freely scrapeable — so don't skip ET domain for ET sources.
-            ddg_skip = None if article.source in _ET_SOURCES else skip_domain
-            ddg_text = _ddg_scraper.search_and_fetch(article.title, skip_domain=ddg_skip)
+            # DDG fallback. For ET sources, scope the search to ET's domain and
+            # require results to be on-domain or have sufficient title overlap.
+            # This prevents bad matches (e.g. Wikipedia "Musical chairs" for "Mphasis").
+            if is_et:
+                ddg_text = _ddg_scraper.search_and_fetch(
+                    article.title,
+                    skip_domain=None,
+                    site_scope=_ET_SITE_SCOPE,
+                )
+            else:
+                ddg_text = _ddg_scraper.search_and_fetch(
+                    article.title,
+                    skip_domain=skip_domain,
+                )
             if ddg_text:
                 article.full_text = ddg_text
                 log.info(
@@ -196,7 +240,7 @@ Write a 60-80 word summary using EXACTLY this structure — label each section:
 
 No bullet points. Short sentences. Written to be spoken aloud."""
 
-        return self._call_llm(prompt, max_tokens=768)
+        return self._call_llm(prompt, max_tokens=768, use_openrouter=True)
 
     def _validate_p0_summary(
         self, article: CuratedArticle, content: str, summary_text: str

@@ -625,7 +625,7 @@ def main():
     if args.skip_email:
         return
 
-    run_date = args.date or datetime.now().strftime("%Y-%m-%d")
+    run_date = Path(episode.file_path).parent.name
 
     prefs_path = Path(__file__).parent.parent / "config" / "preferences.yaml"
     with open(prefs_path) as f:
@@ -668,6 +668,8 @@ def main():
         )
     except Exception as exc:
         log.warning("email_failed", recipient=recipient, error=str(exc))
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ primary:
   provider: chatterbox
   model: ResembleAI/Chatterbox
   params:
-    cfgw: 0.6
+    cfgw: 0.45              # 0.6→0.45: slower, more measured delivery (~10-15% perceived slowdown)
     exaggeration: 0.7
     temperature: 0.6
     max_chars_per_call: 300
@@ -18,8 +18,22 @@ fallback:
   voice_reference: "/Users/rushilkr/Downloads/voice_ref_morgan_combined.wav"
   voice_reference_text: "When I was 17 years old I could throw a baseball 90 miles an hour. You don't have to leave this planet to tell a good story."
 
+# Google Cloud TTS Neural2 — primary provider when segment_routing.gcloud is populated.
+# Requires GOOGLE_APPLICATION_CREDENTIALS (service-account JSON) OR GOOGLE_TTS_API_KEY in .env.
+# Free tier: 4M chars/mo Neural2. Daily episode ~38k chars (~1.14M/mo — well under free tier).
+# A/B voice candidates: en-US-Neural2-J (warm male), en-US-Neural2-D, en-US-Neural2-Q.
+gcloud:
+  params:
+    voice_name: "en-US-Neural2-D"
+    language_code: "en-US"
+    speaking_rate: 1.03       # slightly snappier than default
+    pitch: -0.5               # subtle gravitas without corporate feel
+    sample_rate_hertz: 24000
+    effects_profile_id:
+      - "headphone-class-device"   # optimized for gym/headphone listening
+
 segment_routing:
-  chatterbox:
+  gcloud:
     - opener
     - quick_hits
     - closing
@@ -27,6 +41,7 @@ segment_routing:
     - funding
     - india_tech
     - product_strategy
+  chatterbox: []              # fallback only — triggered if gcloud fails
   f5_tts: []
 
 cleanup:
@@ -38,7 +53,9 @@ output:
   format: mp3
   bitrate: 128k
   sample_rate: 44100
-  silence_between_segments_ms: 1500
-  silence_between_articles_ms: 150
+  silence_between_segments_ms: 2200   # 1500→2200: clearer topic transitions
+  silence_between_articles_ms: 400    # 150→400: breathing room between sentence chunks
   normalize_loudness: true
   target_lufs: -16
+  honor_ssml_breaks: true             # convert <break time="Xms"/> to actual audio silence
+  trim_silence: false                 # preserve natural Chatterbox breath pauses

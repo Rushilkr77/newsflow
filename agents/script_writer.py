@@ -12,6 +12,7 @@ import json
 import os
 import re
 import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import structlog
@@ -104,12 +105,33 @@ Write for a single host narrating to a listener who's a software engineer buildi
 
 Voice guidelines:
 - Sound like a sharp, opinionated tech journalist — not a newsreader. Have a point of view.
-- Use varied, concrete hooks at transitions: "Here's what nobody's talking about...", "This one surprised me...", "Okay, so here's the thing...", "Let me put this in perspective..."
-- After each P0 story, give a reaction or take: "Here's why this matters more than the headline...", "The interesting part isn't X — it's Y."
-- Drop one rhetorical question or aside per major segment to break the pace: "Think about what that actually means for teams shipping today."
+- Transition hooks (DO NOT repeat any hook more than once per episode — these are EXAMPLES for flavor, not a list to cycle through): "Here's the part that actually matters...", "Before we move on — one thing worth sitting with...", "And look, this connects to something bigger...", "That said, there's a wrinkle...", "The headline buries the real story here...", "Worth pausing on this one...", "Pull back for a second...", "If you're building in this space, this is the one...", "You've probably seen this framed as X — here's why that's wrong...", "Real talk for a second...", "Nobody I've read has asked the obvious follow-up question...", "This one's subtle but it compounds fast...", "Set that aside for a moment...", "The counterintuitive take...", "Here's what changes for builders...", "One data point and then I'll move on...", "Not to editorialize, but...", "Okay, slight detour — worth it...", "I keep coming back to this...", "Three words: [memorable phrase]."
+- CRITICAL: Do NOT use the phrases "Moving on", "What's next", "Here's the thing", or "Let me put this in perspective" — they are banned. Invent fresh transitions each time.
+- After each P0 story, give a reaction or take: original framing, not a templated formula.
+- Drop one rhetorical question or aside per major segment to break the pace.
 - Short punchy sentences on key points. Longer conversational sentences for context. Vary the rhythm.
 - Active voice. No jargon without a quick plain-English follow-up.
-- For SSML: wrap pauses as <break time="500ms"/>
+- For SSML (content_ssml field only): SSML is MANDATORY — every sentence must use at least one tag. Bare untagged sentences are not acceptable. Model your output on this example pattern:
+
+  EXAMPLE (use this density and variety):
+  <prosody rate="108%">Anthropic just dropped a</prosody> <emphasis level="strong">200-million-dollar</emphasis> partnership with the Gates Foundation.
+  <break time="600ms"/>
+  <prosody rate="95%">Here's the part that actually matters</prosody> — <prosody pitch="+1st">this isn't just philanthropic optics.</prosody>
+  <break time="400ms"/>
+  They're embedding <emphasis level="moderate">Claude</emphasis> directly into health and education systems across low-income countries.
+  <break time="700ms"/>
+  <prosody rate="92%">If someone asks you about this in an interview, your edge is this:</prosody>
+  <break time="400ms"/>
+  <prosody pitch="+0.5st" rate="97%">Anthropic is building distribution channels that <emphasis level="strong">bypass</emphasis> the traditional enterprise sales cycle entirely.</prosody>
+
+  Rules for each tag type:
+  * Pauses: <break time="400ms"/> sentence boundary, <break time="700ms"/> topic shift, <break time="1200ms"/> segment transition. Place AFTER punctuation.
+  * Emphasis: <emphasis level="strong"> on key numbers/names/punchlines; <emphasis level="moderate"> on product names, company names, verbs that carry meaning
+  * Rate: <prosody rate="108%"> on quick lead-ins and throwaway asides; <prosody rate="92%"> on insights the listener must absorb; <prosody rate="95%"> on setup phrases before a reveal
+  * Pitch: <prosody pitch="+1st"> on rhetorical questions and surprising statements; <prosody pitch="+0.5st"> on interview-edge conclusions; <prosody pitch="-0.5st"> on parenthetical caveats
+  * Acronyms — ALWAYS: <say-as interpret-as="characters">GPU</say-as>, <say-as interpret-as="characters">LLM</say-as>, <say-as interpret-as="characters">API</say-as>, <say-as interpret-as="characters">MCP</say-as>, <say-as interpret-as="characters">RAG</say-as>, <say-as interpret-as="characters">TPU</say-as>, <say-as interpret-as="characters">SDK</say-as>, <say-as interpret-as="characters">AI</say-as>
+  * Numbers: <say-as interpret-as="cardinal">5.5 billion</say-as> for funding; <say-as interpret-as="currency" language="en-IN">1500 crore</say-as> for Indian amounts
+  * SSML RULES: valid XML, balanced tags. Do NOT nest <prosody> inside <prosody>. Escape & as &amp; in text. Do NOT use SSML in content_plain.
 - End each P0 story with: "If someone asks you about this in an interview, here's your edge: [INTERVIEW EDGE insight]"
 - Quick hits: rapid-fire with energy, "In quick hits: [story 1]. [story 2]. [story 3]."
 - You may editorialize on the *implications* of facts in the summaries — what it means, why it matters, what changes. Never invent new facts, names, numbers, or quotes.
@@ -522,10 +544,10 @@ Articles:
         """Return the verbal signpost that opens a segment (used in multi-call parts)."""
         openers = {
             "opener": "Open with: \"Hey, welcome to today's episode of NewsFlow.\"",
-            "ai_updates": "Open with: \"Let's start with what's new in tech and AI...\"",
-            "funding": "Open with: \"Moving on to funding and business news...\"",
-            "india_tech": "Open with: \"Now, a look at what's happening in India tech...\"",
-            "product_strategy": "Open with: \"Time for product and strategy...\"",
+            "ai_updates": "Open with a fresh segment bridge into AI and tech — do not say 'Moving on'.",
+            "funding": "Open with a fresh segment bridge into funding and business news — do not say 'Moving on'.",
+            "india_tech": "Open with a fresh segment bridge into India tech news — do not say 'Moving on'.",
+            "product_strategy": "Open with a fresh segment bridge into product and strategy — do not say 'Moving on'.",
             "quick_hits": "Open with: \"In quick hits today:\"",
         }
         return openers.get(seg_id, f"Begin the {seg_id} segment.")
@@ -614,11 +636,14 @@ Articles:
                 # Measured gTTS pace: ~13 chars/sec (22452 chars → 1714s actual).
                 duration_sec = max(30, len(content_plain) // _CHARS_PER_SEC)
 
+                content_ssml = data.get("content_ssml", content_plain)
+                content_ssml = self._validate_ssml(content_ssml, content_plain)
+
                 return Segment(
                     id=data.get("id", str(uuid.uuid4())),
                     title=seg_title,
                     segment_type=seg_id,
-                    content_ssml=data.get("content_ssml", content_plain),
+                    content_ssml=content_ssml,
                     content_plain=content_plain,
                     duration_estimate_sec=duration_sec,
                     source_article_ids=data.get("source_article_ids", []),
@@ -629,6 +654,19 @@ Articles:
                     log.warning("segment_retry", segment_type=seg_id, attempt=attempt + 1, error=str(e))
 
         raise last_error
+
+    @staticmethod
+    def _validate_ssml(ssml: str, plain_fallback: str) -> str:
+        """Return ssml if it parses as valid XML, otherwise fall back to plain text.
+
+        Wraps in a dummy <s> root since content_ssml is a fragment, not a doc.
+        """
+        try:
+            ET.fromstring(f"<s>{ssml}</s>")
+            return ssml
+        except ET.ParseError:
+            log.warning("ssml_invalid_xml_fallback", chars=len(ssml))
+            return plain_fallback
 
     def _build_segment_prompt(
         self,
@@ -655,7 +693,7 @@ Return ONLY this JSON object:
 {{
   "id": "{uuid.uuid4()}",
   "segment_type": "opener",
-  "content_ssml": "WRITE THE OPENER HERE using <break time=\\"500ms\\"/> for pauses",
+  "content_ssml": "WRITE THE OPENER HERE using <break time=\\"800ms\\"/> for pauses, <emphasis level=\\"moderate\\">key terms</emphasis>, and <say-as interpret-as=\\"characters\\">GPU</say-as> for acronyms",
   "content_plain": "WRITE THE SAME OPENER HERE but with no SSML tags",
   "duration_estimate_sec": 40,
   "source_article_ids": []
@@ -693,7 +731,7 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
 {{
   "id": "{uuid.uuid4()}",
   "segment_type": "{seg_id}",
-  "content_ssml": "WRITE THE FULL SCRIPT HERE, using <break time=\\"500ms\\"/> for pauses",
+  "content_ssml": "WRITE THE FULL SCRIPT HERE using SSML: <break time=\\"800ms\\"/> for pauses, <emphasis level=\\"moderate\\">key terms</emphasis>, <prosody rate=\\"92%\\">dense technical clauses</prosody>, <say-as interpret-as=\\"characters\\">LLM</say-as> for acronyms",
   "content_plain": "WRITE THE SAME SCRIPT HERE but with no SSML tags at all",
   "duration_estimate_sec": 120,
   "source_article_ids": ["article_id_1", "article_id_2"]
@@ -740,7 +778,7 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                     "EXPANSION MODE — cover any missed funding story now. Add: what the round signals for the ecosystem + PM angle. "
                     if expand else ""
                 )
-                + "Use signpost: 'Moving on to funding and business news...'"
+                + "Open with a fresh segment bridge into this section — do not say 'Moving on'."
             ),
             "india_tech": (
                 "Duration: 4-5 minutes. India-focused startup and tech stories. "
@@ -750,7 +788,7 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                     "EXPANSION MODE — cover any missed India story now with full context: company + what happened + market angle. "
                     if expand else ""
                 )
-                + "Use signpost: 'Now, a look at what's happening in India tech...'"
+                + "Open with a fresh segment bridge into India tech — do not say 'Moving on' or 'Now a look at'."
             ),
             "product_strategy": (
                 "Duration: 5-7 minutes. Industry strategy, SaaS disruption, Series B+ moves. "
@@ -760,7 +798,7 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                     "EXPANSION MODE — cover any missed strategy story now. Focus on the business model angle and PM takeaway. "
                     if expand else ""
                 )
-                + "Use signpost: 'Time for product and strategy...'"
+                + "Open with a fresh segment bridge into product and strategy — do not say 'Moving on' or 'Time for product'."
             ),
             "quick_hits": (
                 "Duration: 3-4 minutes. Rapid-fire — one-liner per story: title paraphrase + one sentence on why it matters. "
@@ -1003,7 +1041,13 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
         return takeaways[:3]
 
     def _fallback_segment(self, seg_id: str, seg_title: str) -> Segment:
-        text = f"Moving on. {seg_title} coverage will be available in the next episode."
+        _BRIDGES = [
+            f"We'll catch up on {seg_title} in tomorrow's episode.",
+            f"Nothing on {seg_title} today — back tomorrow.",
+            f"{seg_title} coverage picks up in the next episode.",
+            f"Skipping {seg_title} today — nothing that clears the bar.",
+        ]
+        text = _BRIDGES[hash(seg_id) % len(_BRIDGES)]
         return Segment(
             id=str(uuid.uuid4()),
             title=seg_title,

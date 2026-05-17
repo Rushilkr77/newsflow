@@ -2,6 +2,9 @@
 .env
 credentials.json
 token.json
+*.json
+!package.json
+!pyproject.json
 
 # Pipeline outputs
 workspace/

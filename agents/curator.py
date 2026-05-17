@@ -41,6 +41,15 @@ _PREFS_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "preferenc
 # Model for classification (best small model for JSON output)
 _CURATOR_LOCAL_MODEL = os.getenv("CURATOR_LOCAL_MODEL")
 
+_OPENROUTER_CURATOR_MODELS: list[str] = [
+    m.strip()
+    for m in os.getenv(
+        "OPENROUTER_CURATOR_MODELS",
+        "qwen/qwen-2.5-3b-instruct:free,qwen/qwen3-8b:free,meta-llama/llama-3.3-70b-instruct:free",
+    ).split(",")
+    if m.strip()
+]
+
 # Funding/M&A signal patterns — used for post-classification override
 _FUNDING_SIGNALS = re.compile(
     r'\$\d+(?:\.\d+)?[MBmb]\b'  # $38M, $1.5B, $100m
@@ -430,6 +439,7 @@ Return ONLY a JSON array (no markdown, no explanation):
             user=user_prompt,
             max_tokens=3072,  # bumped from 2048 — longer system prompt + 8 articles needs more room
             local_model_override=_CURATOR_LOCAL_MODEL,
+            openrouter_models=_OPENROUTER_CURATOR_MODELS,
         )
 
         # Strip markdown fences if model wraps response

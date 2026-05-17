@@ -7,10 +7,11 @@ anthropic>=0.34
 openai>=1.0          # used for Ollama OpenAI-compatible API (USE_LOCAL_LLM=true)
 mcp>=1.0             # FastMCP server for article_fetcher_server.py (optional — server mode only)
 
-# Gmail
+# Gmail + Google Cloud TTS
 google-api-python-client>=2.100
 google-auth-httplib2>=0.2
 google-auth-oauthlib>=1.1
+google-cloud-texttospeech>=2.16
 
 # HTML parsing
 beautifulsoup4>=4.12

@@ -1,7 +1,8 @@
 """
 Upload episode MP3 to Google Drive and return a shareable link.
-Uses a separate drive_token.json (drive.file scope only — cannot access existing files).
-First run opens a browser for one-time OAuth consent.
+Uses OAuth user credentials (drive.file scope). Refresh tokens never expire once
+the GCP OAuth app is published (move from Testing → Production in OAuth consent screen).
+First run or after revocation: delete drive_token.json to trigger browser re-auth.
 """
 import os
 from pathlib import Path

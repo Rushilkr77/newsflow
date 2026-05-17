@@ -1,12 +1,12 @@
 """
-Agent 5: Audio Producer (Phase 2 — Chatterbox TTS + F5-TTS fallback)
-Converts podcast script to MP3 using Chatterbox TTS (free, local HuggingFace inference).
-Falls back to F5-TTS (free, local) if Chatterbox is unavailable, then gTTS as last resort.
+Agent 5: Audio Producer
+Converts podcast script to MP3. Primary: Google Cloud TTS Neural2 (cloud, free tier 4M chars/mo).
+Fallback: Chatterbox TTS (local, HuggingFace). Last resort: gTTS.
 
 Flow:
   1. Load podcast_script.json
-  2. For each segment, split plain text into ≤300-char chunks (Chatterbox limit)
-  3. TTS each chunk → AudioSegment
+  2. For each segment, route to TTS provider (gcloud primary, chatterbox fallback, gtts last resort)
+  3. GCloud: send content_ssml wrapped in <speak>; Chatterbox/F5: plain text chunks ≤300 chars
   4. Concatenate with silence between segments/articles
   5. Normalize loudness to -16 LUFS
   6. Export MP3 128kbps 44.1kHz with ID3 tags
@@ -43,10 +43,16 @@ def _load_tts_config() -> dict[str, Any]:
 _TTS_CFG = _load_tts_config()
 _PRIMARY_CFG: dict = _TTS_CFG.get("primary", {})
 _FALLBACK_CFG: dict = _TTS_CFG.get("fallback", {})
+_GCLOUD_CFG: dict = _TTS_CFG.get("gcloud", {})
 _OUTPUT_CFG: dict = _TTS_CFG.get("output", {})
+
+_PRIMARY_PROVIDER: str = _PRIMARY_CFG.get("provider", "chatterbox")
+_FALLBACK_PROVIDER: str = _FALLBACK_CFG.get("provider", "f5_tts")
 
 _SILENCE_BETWEEN_SEGMENTS_MS: int = _OUTPUT_CFG.get("silence_between_segments_ms", 1500)
 _SILENCE_BETWEEN_ARTICLES_MS: int = _OUTPUT_CFG.get("silence_between_articles_ms", 150)
+_HONOR_SSML_BREAKS: bool = _OUTPUT_CFG.get("honor_ssml_breaks", False)
+_TRIM_SILENCE: bool = _OUTPUT_CFG.get("trim_silence", True)
 _NORMALIZE_LOUDNESS: bool = _OUTPUT_CFG.get("normalize_loudness", True)
 _TARGET_LUFS: float = float(_OUTPUT_CFG.get("target_lufs", -16))
 _OUTPUT_FORMAT: str = _OUTPUT_CFG.get("format", "mp3")
@@ -60,19 +66,18 @@ _HIGHPASS_HZ: int = int(_CLEANUP_CFG.get("highpass_hz", 80))
 # Max chars per TTS call per provider (from tts_config.yaml)
 _CHATTERBOX_MAX_CHARS: int = _PRIMARY_CFG.get("params", {}).get("max_chars_per_call", 300)
 
-# Per-segment provider routing: segment_type → "chatterbox" | "f5_tts"
+# Per-segment provider routing: segment_type → provider name
 # Loaded from tts_config.yaml segment_routing block.
-# Hardcoded defaults kick in for any segment not listed in config.
 _DEFAULT_LONG_SEGMENTS: frozenset = frozenset({"ai_updates", "funding", "india_tech", "product_strategy"})
 _SEGMENT_ROUTING: dict[str, str] = {}
 for _provider_key, _segments in _TTS_CFG.get("segment_routing", {}).items():
     for _seg in (_segments or []):
-        _SEGMENT_ROUTING[_seg] = _provider_key  # "chatterbox" or "f5_tts"
+        _SEGMENT_ROUTING[_seg] = _provider_key
 
-# If chatterbox/f5_tts have no assigned segments, disable them so they never load.
-# Set both to [] in tts_config.yaml to use gTTS only (fast, no model download).
+# Providers are disabled when no segments are assigned to them.
 _CHATTERBOX_DISABLED: bool = not _TTS_CFG.get("segment_routing", {}).get("chatterbox")
 _F5TTS_DISABLED: bool = not _TTS_CFG.get("segment_routing", {}).get("f5_tts")
+_GCLOUD_DISABLED: bool = not _TTS_CFG.get("segment_routing", {}).get("gcloud")
 
 
 # Ensure pydub can find ffmpeg on Windows after a winget install (PATH not refreshed yet)
@@ -261,6 +266,62 @@ class GTTSProvider:
         return AudioSegment.from_mp3(mp3_bytes)
 
 
+class GCloudProvider:
+    """Google Cloud TTS Neural2 — primary provider (4M chars/mo free tier).
+
+    Requires GOOGLE_APPLICATION_CREDENTIALS env var pointing to a service-account JSON
+    (or a GCP API key via GOOGLE_TTS_API_KEY). install: pip install google-cloud-texttospeech
+    """
+
+    def __init__(self, params: dict):
+        self._voice_name: str = params.get("voice_name", "en-US-Neural2-J")
+        self._language_code: str = params.get("language_code", "en-US")
+        self._speaking_rate: float = float(params.get("speaking_rate", 0.92))
+        self._pitch: float = float(params.get("pitch", -1.0))
+        self._sample_rate: int = int(params.get("sample_rate_hertz", 24000))
+        effects_cfg = params.get("effects_profile_id", [])
+        self._effects_profile: list[str] = effects_cfg if isinstance(effects_cfg, list) else [effects_cfg]
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from google.cloud import texttospeech  # type: ignore[import]
+            api_key = os.getenv("GOOGLE_TTS_API_KEY")
+            if api_key:
+                from google.api_core import gapic_v1
+                self._client = texttospeech.TextToSpeechClient(
+                    client_options={"api_key": api_key}
+                )
+            else:
+                self._client = texttospeech.TextToSpeechClient()
+        return self._client
+
+    def synthesize(self, text: str, is_ssml: bool = False) -> AudioSegment:
+        from google.cloud import texttospeech  # type: ignore[import]
+
+        client = self._get_client()
+        if is_ssml:
+            synth_input = texttospeech.SynthesisInput(ssml=text)
+        else:
+            synth_input = texttospeech.SynthesisInput(text=text)
+
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=self._language_code,
+            name=self._voice_name,
+        )
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+            speaking_rate=self._speaking_rate,
+            pitch=self._pitch,
+            sample_rate_hertz=self._sample_rate,
+            effects_profile_id=self._effects_profile,
+        )
+        response = client.synthesize_speech(
+            input=synth_input, voice=voice, audio_config=audio_config
+        )
+        return AudioSegment.from_wav(io.BytesIO(response.audio_content))
+
+
 # ---------------------------------------------------------------------------
 # Main agent
 # ---------------------------------------------------------------------------
@@ -270,6 +331,7 @@ class AudioProducerAgent:
         self._chatterbox: ChatterboxProvider | None = None
         self._f5tts: F5TTSProvider | None = None
         self._gtts: GTTSProvider | None = None
+        self._gcloud: GCloudProvider | None = None
         self._active_provider: str = "unknown"
 
     def run(self, script: PodcastScript, workspace: str) -> Episode:
@@ -285,7 +347,8 @@ class AudioProducerAgent:
                 chars=len(segment.content_plain),
             )
             try:
-                seg_audio = self._segment_to_audio(segment.content_plain, segment.segment_type)
+                ssml_src = segment.content_ssml if _HONOR_SSML_BREAKS else None
+                seg_audio = self._segment_to_audio(segment.content_plain, segment.segment_type, ssml_src)
                 if i > 0:
                     audio_segments.append(segment_silence)
                 audio_segments.append(seg_audio)
@@ -354,7 +417,7 @@ class AudioProducerAgent:
     # TTS dispatch: segment-aware routing with fallback
     # -------------------------------------------------------------------------
 
-    def _segment_to_audio(self, text: str, segment_type: str = "") -> AudioSegment:
+    def _segment_to_audio(self, text: str, segment_type: str = "", ssml: str | None = None) -> AudioSegment:
         """
         Route each segment to its designated TTS provider, then fall back if needed.
 
@@ -363,6 +426,9 @@ class AudioProducerAgent:
           F5-TTS     — (none by default; assign segments in tts_config.yaml to enable)
 
         Fallback chain: designated provider → other provider → gTTS
+
+        ssml: when provided and honor_ssml_breaks is True, <break> tags are converted to
+              actual silence intervals between TTS chunks for non-SSML providers.
         """
         designated = _SEGMENT_ROUTING.get(
             segment_type,
@@ -370,57 +436,130 @@ class AudioProducerAgent:
         )
         log.info("tts_provider_selected", segment_type=segment_type, provider=designated)
 
-        if _CHATTERBOX_DISABLED and _F5TTS_DISABLED:
-            # Both local providers disabled — go straight to gTTS (fast, no model load)
-            log.info("tts_provider_selected", segment_type=segment_type, provider="gtts")
-            return self._synthesize_gtts(text)
+        def chatterbox_fn(t: str) -> AudioSegment:
+            return self._synthesize_chatterbox(t, ssml=ssml)
+
+        def gcloud_fn(t: str) -> AudioSegment:
+            return self._synthesize_gcloud(t, ssml=ssml)
+
+        # Build [primary, fallback, last_resort] based on config + disabled flags.
+        # gTTS is always the last-resort if it hasn't been selected as an earlier tier.
+        if designated == "gcloud" and not _GCLOUD_DISABLED:
+            candidates = [gcloud_fn]
+            if not _CHATTERBOX_DISABLED:
+                candidates.append(chatterbox_fn)
+            elif not _F5TTS_DISABLED:
+                candidates.append(self._synthesize_f5tts)
+            candidates.append(self._synthesize_gtts)
+        elif _CHATTERBOX_DISABLED and _F5TTS_DISABLED and _GCLOUD_DISABLED:
+            candidates = [self._synthesize_gtts]
         elif designated == "chatterbox" and not _CHATTERBOX_DISABLED:
-            primary_fn, fallback_fn = self._synthesize_chatterbox, self._synthesize_f5tts
+            candidates = [chatterbox_fn, self._synthesize_gtts]
         elif _CHATTERBOX_DISABLED:
-            # Chatterbox disabled — use F5-TTS with gTTS fallback
-            primary_fn, fallback_fn = self._synthesize_f5tts, self._synthesize_gtts
+            candidates = [self._synthesize_f5tts, self._synthesize_gtts]
         elif _F5TTS_DISABLED:
-            # F5-TTS disabled — use Chatterbox with gTTS fallback
-            primary_fn, fallback_fn = self._synthesize_chatterbox, self._synthesize_gtts
+            candidates = [chatterbox_fn, self._synthesize_gtts]
         else:
-            primary_fn, fallback_fn = self._synthesize_f5tts, self._synthesize_chatterbox
+            candidates = [self._synthesize_f5tts, chatterbox_fn, self._synthesize_gtts]
 
-        try:
-            return primary_fn(text)
-        except Exception as e:
-            log.warning("primary_tts_failed", segment_type=segment_type,
-                        provider=designated, error=str(e))
+        last_err: Exception = RuntimeError("no candidates")
+        for fn in candidates:
+            try:
+                result = fn(text)
+                return result
+            except Exception as e:
+                log.warning("tts_provider_failed", provider=fn.__name__ if hasattr(fn, "__name__") else str(fn), error=str(e))
+                last_err = e
 
-        try:
-            return fallback_fn(text)
-        except Exception as e:
-            log.warning("fallback_tts_failed", segment_type=segment_type, error=str(e))
+        raise last_err
 
-        return self._synthesize_gtts(text)
-
-    def _synthesize_chatterbox(self, text: str) -> AudioSegment:
+    def _synthesize_chatterbox(self, text: str, ssml: str | None = None) -> AudioSegment:
         if self._chatterbox is None:
             self._chatterbox = ChatterboxProvider(_PRIMARY_CFG.get("params", {}))
 
-        chunks = _chunk_text(text, max_chars=_CHATTERBOX_MAX_CHARS)
-        parts: list[AudioSegment] = []
-        article_silence = AudioSegment.silent(duration=_SILENCE_BETWEEN_ARTICLES_MS)
+        # When honor_ssml_breaks is on and SSML content available, split on <break> tags
+        # and insert corresponding silence between synthesized chunks.
+        if ssml and _HONOR_SSML_BREAKS:
+            chunks_with_pauses = _split_on_ssml_breaks(ssml)
+        else:
+            chunks_with_pauses = [(chunk, _SILENCE_BETWEEN_ARTICLES_MS) for chunk in _chunk_text(text, max_chars=_CHATTERBOX_MAX_CHARS)]
 
-        for chunk in chunks:
-            if not chunk.strip():
-                continue
-            audio = self._chatterbox.synthesize(chunk)
-            audio = self._trim_silence(audio)
-            audio = self._clean_audio(audio)
-            if parts:
-                parts.append(article_silence)
-            parts.append(audio)
+        parts: list[AudioSegment] = []
+        for chunk_text_content, trailing_silence_ms in chunks_with_pauses:
+            for sub_chunk in _chunk_text(chunk_text_content, max_chars=_CHATTERBOX_MAX_CHARS):
+                if not sub_chunk.strip():
+                    continue
+                audio = self._chatterbox.synthesize(sub_chunk)
+                if _TRIM_SILENCE:
+                    audio = self._trim_silence(audio)
+                audio = self._clean_audio(audio)
+                parts.append(audio)
+            if parts and trailing_silence_ms > 0:
+                parts.append(AudioSegment.silent(duration=trailing_silence_ms))
 
         if not parts:
             return AudioSegment.silent(duration=500)
 
         self._active_provider = "chatterbox"
         return sum(parts[1:], parts[0])
+
+    def _synthesize_gcloud(self, text: str, ssml: str | None = None) -> AudioSegment:
+        """Google Cloud TTS Neural2. Sends full SSML when available (GCloud handles it natively).
+
+        GCloud limit is 5000 bytes/request — much larger than Chatterbox chunks, so we only
+        split if the content exceeds 4500 chars. SSML breaks are handled by GCloud natively;
+        no need for _split_on_ssml_breaks here.
+        """
+        if self._gcloud is None:
+            self._gcloud = GCloudProvider(_GCLOUD_CFG.get("params", _GCLOUD_CFG))
+
+        parts: list[AudioSegment] = []
+        silence = AudioSegment.silent(duration=_SILENCE_BETWEEN_ARTICLES_MS)
+
+        if ssml and _HONOR_SSML_BREAKS:
+            # Escape bare & that appear in text nodes (e.g. "R&D") — invalid XML otherwise.
+            # Only escape & not already part of an entity reference (&amp; &lt; etc).
+            ssml = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;)', '&amp;', ssml)
+            # Wrap in <speak> root as GCloud requires, then send as one SSML request
+            # (or chunk if extremely long — GCloud 5000-byte limit is generous).
+            _GCLOUD_MAX_BYTES = 4500
+            content = f"<speak>{ssml}</speak>"
+            if len(content.encode()) <= _GCLOUD_MAX_BYTES:
+                audio = self._synthesize_gcloud_chunk(content, is_ssml=True)
+                parts.append(audio)
+            else:
+                # Split on breaks for chunking, send each chunk as SSML
+                for chunk_text_content, trailing_ms in _split_on_ssml_breaks(ssml):
+                    chunk_ssml = f"<speak>{chunk_text_content}</speak>"
+                    audio = self._synthesize_gcloud_chunk(chunk_ssml, is_ssml=True)
+                    parts.append(audio)
+                    if trailing_ms > 0:
+                        parts.append(AudioSegment.silent(duration=trailing_ms))
+        else:
+            for chunk in _chunk_text(text, max_chars=4000):
+                if not chunk.strip():
+                    continue
+                audio = self._synthesize_gcloud_chunk(chunk, is_ssml=False)
+                if parts:
+                    parts.append(silence)
+                parts.append(audio)
+
+        if not parts:
+            return AudioSegment.silent(duration=500)
+
+        self._active_provider = "gcloud"
+        return sum(parts[1:], parts[0])
+
+    def _synthesize_gcloud_chunk(self, text: str, is_ssml: bool) -> AudioSegment:
+        """Single GCloud TTS API call. On SSML rejection, retries with plain text."""
+        try:
+            return self._gcloud.synthesize(text, is_ssml=is_ssml)  # type: ignore[union-attr]
+        except Exception as e:
+            if is_ssml and "Invalid SSML" in str(e):
+                plain = re.sub(r"<[^>]+>", "", text).strip()
+                log.warning("gcloud_ssml_invalid_retry_plain", chars=len(plain), error=str(e)[:80])
+                return self._gcloud.synthesize(plain, is_ssml=False)  # type: ignore[union-attr]
+            raise
 
     def _synthesize_f5tts(self, text: str) -> AudioSegment:
         """
@@ -570,6 +709,32 @@ class AudioProducerAgent:
 # ---------------------------------------------------------------------------
 # Shared text chunking utility
 # ---------------------------------------------------------------------------
+
+def _split_on_ssml_breaks(ssml: str) -> list[tuple[str, int]]:
+    """Split SSML content on <break> tags, returning (plain_text, trailing_silence_ms) pairs.
+
+    Strips all other SSML tags so each plain_text chunk is clean for TTS.
+    The trailing_silence_ms is the duration of the <break> that follows the chunk.
+    The final chunk has no trailing break, so its silence defaults to 0.
+    """
+    import re as _re
+    _BREAK_RE = _re.compile(r'<break\s+time="(\d+)ms"\s*/>', _re.IGNORECASE)
+    _TAG_RE = _re.compile(r"<[^>]+>")
+
+    parts = _BREAK_RE.split(ssml)
+    # _BREAK_RE.split alternates: [text, ms, text, ms, ..., text]
+    result: list[tuple[str, int]] = []
+    i = 0
+    while i < len(parts):
+        raw_chunk = parts[i]
+        plain = _TAG_RE.sub("", raw_chunk).strip()
+        trailing_ms = int(parts[i + 1]) if i + 1 < len(parts) else 0
+        if plain:
+            result.append((plain, trailing_ms))
+        i += 2
+
+    return result if result else [(_TAG_RE.sub("", ssml).strip(), 0)]
+
 
 def _chunk_text(text: str, max_chars: int) -> list[str]:
     """Split text at sentence boundaries to stay under max_chars."""
