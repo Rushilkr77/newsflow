@@ -1,6 +1,6 @@
 #!/bin/bash
-# Daily NewsFlow pipeline wrapper — invoked by launchd at 10:00.
-# caffeinate prevents idle sleep mid-run; Ollama is started if not already up.
+# Daily NewsFlow pipeline wrapper — invoked by launchd at scheduled times.
+# caffeinate prevents idle sleep mid-run.
 set -euo pipefail
 
 REPO="/Users/rushilkr/Projects/newsflow"
@@ -46,15 +46,6 @@ if [[ -f "$VENV/bin/activate" ]]; then
 else
     echo "ERROR: venv not found at $VENV — run 'python -m venv .venv && pip install -r requirements.txt'"
     exit 1
-fi
-
-# Start Ollama if not already running
-if ! pgrep -x ollama > /dev/null 2>&1; then
-    echo "Starting Ollama..."
-    nohup ollama serve > /dev/null 2>&1 &
-    sleep 8
-else
-    echo "Ollama already running."
 fi
 
 # Run pipeline — caffeinate -dimsu covers display/disk/system/idle/user idle sleep

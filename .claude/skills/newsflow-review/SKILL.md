@@ -98,11 +98,11 @@ From `podcast_script.json`:
      At 19 chars/sec the estimate should closely match actual audio. Cross-check with
      `duration_sec` in `episode_metadata.json` (actual audio) if it exists.
 2. **Segment coverage**: Are all expected segment types present?
-   - Required: `cold_open`, `intro`, `ai_updates`, `closing`
-   - Expected: at least 3 of `funding_ma`, `india_tech`, `product_strategy`, `quick_hits`
+   - Required: `opener`, `ai_updates`, `closing`
+   - Expected: at least 3 of `funding`, `india_tech`, `product_strategy`, `quick_hits`
 3. **Discussion hooks**: Count `top_takeaways` — target is 3
 4. **SSML check**: Sample `content_ssml` from the `ai_updates` segment — does it contain `<break` tags? Does `content_plain` exist and differ from SSML?
-5. **Cold open quality**: Read the `cold_open` segment — does it hook with a specific story, or is it generic?
+5. **Opener quality**: Read the `opener` segment — does it hook with a specific story, or is it generic?
 
 **Note**: There is no tighten-pass in the current codebase. If duration exceeds 50 min, flag it as an overrun but do not look for a tighten-pass — it is not implemented.
 
@@ -189,7 +189,7 @@ P2 "{title}": 41 words ✓
 
 ### Script Quality
 Duration: 47 min ✓  (target 40-90 min)
-Segments: cold_open ✓ intro ✓ ai_updates ✓ funding_ma ✓ india_tech ✗ product_strategy ✓ quick_hits ✓ closing ✓
+Segments: opener ✓ ai_updates ✓ funding ✓ india_tech ✗ product_strategy ✓ quick_hits ✓ closing ✓
 Top takeaways: 3 ✓
 SSML present: ✓
 

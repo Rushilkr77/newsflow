@@ -14,9 +14,10 @@ Usage:
   )
 """
 import os
+import time
 
 import structlog
-from openai import APIConnectionError, APIError, APITimeoutError
+from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
 
 log = structlog.get_logger(__name__)
 
@@ -24,6 +25,44 @@ _USE_LOCAL = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
 _LOCAL_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen2.5:7b")
 _LOCAL_BASE_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+# Models blacklisted for this process lifetime (daily limit hit or spend limit exceeded).
+# Shared across all chat() calls so a model that exhausts its quota on call #1
+# is silently skipped on calls #2..N instead of burning time on guaranteed failures.
+_session_blacklist: set[str] = set()
+
+
+def _parse_openrouter_error(exc: APIStatusError) -> tuple[bool, bool, float | None]:
+    """
+    Parse an OpenRouter APIStatusError.
+    Returns (is_daily_limit, is_spend_limit, retry_after_seconds).
+    """
+    body = getattr(exc, "body", None) or {}
+    error_obj = body.get("error", {}) if isinstance(body, dict) else {}
+    if not isinstance(error_obj, dict):
+        error_obj = {}
+    msg = error_obj.get("message", "")
+    metadata = error_obj.get("metadata", {}) or {}
+
+    is_daily_limit = "free-models-per-day" in msg or "rate-models-per-day" in msg
+    is_spend_limit = exc.status_code == 402
+
+    retry_after: float | None = None
+    if not is_daily_limit and not is_spend_limit and exc.status_code == 429:
+        raw_secs = metadata.get("retry_after_seconds") if isinstance(metadata, dict) else None
+        if raw_secs is not None:
+            retry_after = min(float(raw_secs), 90.0)
+        else:
+            response = getattr(exc, "response", None)
+            if response is not None:
+                ra_header = response.headers.get("Retry-After")
+                if ra_header:
+                    try:
+                        retry_after = min(float(ra_header), 90.0)
+                    except (ValueError, TypeError):
+                        pass
+
+    return is_daily_limit, is_spend_limit, retry_after
 
 # Lazy-initialised clients
 _anthropic_client = None
@@ -52,9 +91,13 @@ def _get_openrouter():
     global _openrouter_client
     if _openrouter_client is None:
         from openai import OpenAI
+        # Free-tier models frequently hang TCP connections for hours before
+        # returning 429s. 60s timeout surfaces these as APITimeoutError so the
+        # model-fallback loop in chat() can move to the next model immediately.
         _openrouter_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=OPENROUTER_API_KEY,
+            timeout=60.0,
         )
     return _openrouter_client
 
@@ -88,10 +131,54 @@ def chat(
     # OpenRouter path: try each model in sequence before falling back
     if openrouter_models and OPENROUTER_API_KEY:
         for model in openrouter_models:
-            try:
-                return _chat_openrouter(model, system, user, max_tokens)
-            except (APIError, APIConnectionError, APITimeoutError) as exc:
-                log.warning("openrouter_model_failed", model=model, error=str(exc))
+            if model in _session_blacklist:
+                log.debug("openrouter_model_skipped", model=model, reason="session_blacklist")
+                continue
+
+            retried = False
+            while True:
+                try:
+                    return _chat_openrouter(model, system, user, max_tokens)
+                except APIStatusError as exc:
+                    is_daily, is_spend, retry_after = _parse_openrouter_error(exc)
+
+                    if is_daily:
+                        log.warning("openrouter_model_blacklisted", model=model, reason="daily_limit")
+                        _session_blacklist.add(model)
+                        break
+
+                    if is_spend:
+                        log.warning("openrouter_model_blacklisted", model=model, reason="spend_limit")
+                        _session_blacklist.add(model)
+                        break
+
+                    if exc.status_code == 404:
+                        log.warning("openrouter_model_blacklisted", model=model, reason="not_found")
+                        _session_blacklist.add(model)
+                        break
+
+                    if retry_after is not None and not retried:
+                        log.warning("openrouter_model_rate_limited", model=model, retry_after_sec=retry_after)
+                        time.sleep(retry_after)
+                        retried = True
+                        continue
+
+                    log.warning("openrouter_model_failed", model=model, error=str(exc))
+                    break
+
+                except APIConnectionError as exc:
+                    if not retried:
+                        log.warning("openrouter_model_connection_retry", model=model, error=str(exc))
+                        time.sleep(2)
+                        retried = True
+                        continue
+                    log.warning("openrouter_model_failed", model=model, error=str(exc))
+                    break
+
+                except APITimeoutError as exc:
+                    log.warning("openrouter_model_failed", model=model, error=str(exc))
+                    break
+
         log.warning("openrouter_all_failed", models=openrouter_models)
         # Fall through to local/Anthropic path
 
@@ -145,5 +232,8 @@ def _chat_openrouter(model: str, system: str, user: str, max_tokens: int) -> str
         output_tokens=usage.completion_tokens if usage else None,
     )
     if not response.choices:
-        raise ValueError(f"OpenRouter returned empty choices for model {model}")
-    return response.choices[0].message.content.strip()
+        raise ValueError(f"OpenRouter {model} returned empty choices")
+    content = response.choices[0].message.content
+    if not content or not content.strip():
+        raise ValueError(f"OpenRouter {model} returned empty content")
+    return content.strip()

@@ -34,7 +34,7 @@ _OPENROUTER_SCRIPT_MODELS: list[str] = [
     m.strip()
     for m in os.getenv(
         "OPENROUTER_SCRIPT_MODELS",
-        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free",
+        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free,google/gemma-4-31b-it:free",
     ).split(",")
     if m.strip()
 ]
@@ -529,7 +529,9 @@ Articles:
                 text = self._unwrap_json_plain(text)
                 if len(text) < 20:
                     raise ValueError(f"part too short ({len(text)} chars)")
-                self._grounding_check(text, summaries, seg_id)
+                suspect_count = self._grounding_check(text, summaries, seg_id)
+                if suspect_count >= 3:
+                    raise ValueError(f"grounding_check failed: {suspect_count} suspect facts — regenerating")
                 return text
             except Exception as e:
                 last_error = e
@@ -629,7 +631,9 @@ Articles:
                 if len(content_plain) < 30 or any(p in content_plain for p in _PLACEHOLDER_SIGNALS):
                     raise ValueError(f"placeholder/empty content_plain ({len(content_plain)} chars)")
 
-                self._grounding_check(content_plain, summaries, seg_id)
+                suspect_count = self._grounding_check(content_plain, summaries, seg_id)
+                if suspect_count >= 3:
+                    raise ValueError(f"grounding_check failed: {suspect_count} suspect facts — regenerating")
 
                 # Compute duration from actual content length.
                 # The model always returns 120 regardless of length, so we ignore its estimate.
@@ -660,12 +664,16 @@ Articles:
         """Return ssml if it parses as valid XML, otherwise fall back to plain text.
 
         Wraps in a dummy <s> root since content_ssml is a fragment, not a doc.
+        Strips markdown bold/italic markers first so TTS doesn't narrate asterisks.
         """
+        # Strip markdown bold (**text** or __text__) and italic (*text* or _text_)
+        # before XML validation — free-tier LLMs leak markdown into SSML.
+        cleaned = re.sub(r"\*{1,2}|_{1,2}", "", ssml)
         try:
-            ET.fromstring(f"<s>{ssml}</s>")
-            return ssml
+            ET.fromstring(f"<s>{cleaned}</s>")
+            return cleaned
         except ET.ParseError:
-            log.warning("ssml_invalid_xml_fallback", chars=len(ssml))
+            log.warning("ssml_invalid_xml_fallback", chars=len(cleaned))
             return plain_fallback
 
     def _build_segment_prompt(
@@ -1063,14 +1071,14 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
         script_text: str,
         source_summaries: list[ArticleSummary],
         seg_id: str,
-    ) -> None:
+    ) -> int:
         """
-        Log warnings for numeric claims in the generated script that are not present
-        in any source summary. Targets dollar amounts and percentages — the most
-        common hallucination vectors. Does NOT modify the script (logging only).
+        Check numeric claims in script against source summaries.
+        Returns count of suspect sentences (unmatched dollar amounts / percentages).
+        Caller raises ValueError to trigger retry when count is too high.
         """
         if not source_summaries:
-            return
+            return 0
 
         all_summary_text = " ".join(
             (s.summary_text or "") + " " + s.title for s in source_summaries
@@ -1104,3 +1112,4 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                 suspect_sentences=total_warned,
                 note="Review script for possible hallucinated numeric facts",
             )
+        return total_warned

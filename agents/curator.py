@@ -45,7 +45,7 @@ _OPENROUTER_CURATOR_MODELS: list[str] = [
     m.strip()
     for m in os.getenv(
         "OPENROUTER_CURATOR_MODELS",
-        "qwen/qwen-2.5-3b-instruct:free,qwen/qwen3-8b:free,meta-llama/llama-3.3-70b-instruct:free",
+        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free,google/gemma-4-31b-it:free",
     ).split(",")
     if m.strip()
 ]
@@ -543,12 +543,12 @@ P3 — Skip entirely:
 {p3}
 
 Categories:
-- big_tech_launches: Launches or announcements from Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft — product, model, or acquisition
+- big_tech_launches: Launches, announcements, OR leadership/org changes at Meta, Apple, NVIDIA, Google, OpenAI, Anthropic, Microsoft — product, model, acquisition, exec hire/departure, restructure. If the article is ABOUT one of these companies, use this category NOT industry_strategy.
 - ai_products_tools: AI-powered products, tools, or systems with real-world impact — developer tools, agentic AI, AI applied to security/science/medicine/other domains
 - product_innovations: Non-AI products/hardware representing a real direction change (new form factor, platform, category)
 - india_tech: Indian tech ecosystem — companies founded/headquartered in India, India IT/BPO sector shifts, India fintech (UPI, neobanks, payments), Indian govt AI/digital policy; use for funding rounds, product launches, exits, notable hires, and founder profiles from the Indian ecosystem
-- funding_ma: Funding rounds, M&A, acquisitions, valuations
-- industry_strategy: SaaS disruption, go-to-market moves, Series B+ company strategy
+- funding_ma: Funding rounds, M&A, acquisitions, valuations — for non-big-tech companies
+- industry_strategy: SaaS disruption, go-to-market moves, Series B+ company strategy — for companies NOT in the big_tech_launches list above
 - engineering_tech: Technical deep dives, infra, open source (no product angle) — typically P2
 - policy_safety: Regulations, AI safety, government policy, compliance — typically P2"""
 

@@ -11,14 +11,12 @@
         <string>/Users/rushilkr/Projects/newsflow/scripts/daily_run.sh</string>
     </array>
 
-    <!-- Fire at 10:00 Mon-Fri only (Weekday: 1=Mon, 5=Fri) -->
+    <!-- Fire at 10:00 Tue-Sat (IST local time).
+         Each run uses lookback_days to pick up the previous day's newsletters,
+         which arrive in US morning hours (after 10 AM IST).
+         Mon and Sun handled separately by com.newsflow.weekend.plist. -->
     <key>StartCalendarInterval</key>
     <array>
-        <dict>
-            <key>Weekday</key><integer>1</integer>
-            <key>Hour</key><integer>10</integer>
-            <key>Minute</key><integer>0</integer>
-        </dict>
         <dict>
             <key>Weekday</key><integer>2</integer>
             <key>Hour</key><integer>10</integer>
@@ -36,6 +34,12 @@
         </dict>
         <dict>
             <key>Weekday</key><integer>5</integer>
+            <key>Hour</key><integer>10</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+        <dict>
+            <!-- Saturday: captures Friday's full content (TLDR AI arrives Fri ~19:30 IST) -->
+            <key>Weekday</key><integer>6</integer>
             <key>Hour</key><integer>10</integer>
             <key>Minute</key><integer>0</integer>
         </dict>

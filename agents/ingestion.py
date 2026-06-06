@@ -9,6 +9,7 @@ Additional custom senders can be added via NEWSLETTER_SENDERS env var
 import base64
 import email
 import os
+import socket
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -342,6 +343,27 @@ class IngestionAgent:
 
     def _fetch_messages(self) -> list[str]:
         """Fetch message IDs matching the Gmail query with exponential backoff."""
+        _NETWORK_EXC = (OSError, socket.gaierror, ConnectionError)
+        # Retry the entire fetch up to 3 times on network-level failures
+        # (DNS down, connection reset, etc. — as seen in May 26 crash).
+        for net_attempt in range(3):
+            try:
+                return self._fetch_messages_inner()
+            except _NETWORK_EXC as exc:
+                if net_attempt < 2:
+                    wait = 30 * (net_attempt + 1)
+                    log.warning(
+                        "gmail_network_error_retrying",
+                        attempt=net_attempt + 1,
+                        wait_sec=wait,
+                        error=str(exc),
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+        return []  # unreachable, satisfies type checker
+
+    def _fetch_messages_inner(self) -> list[str]:
         messages = []
         page_token = None
         retries = 0

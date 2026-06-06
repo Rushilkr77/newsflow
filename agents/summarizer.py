@@ -38,7 +38,7 @@ _OPENROUTER_SUMMARIZER_MODELS: list[str] = [
     m.strip()
     for m in os.getenv(
         "OPENROUTER_SUMMARIZER_MODELS",
-        "qwen/qwen3-8b:free,qwen/qwen-2.5-7b-instruct:free,meta-llama/llama-3.3-70b-instruct:free",
+        "openai/gpt-oss-120b:free,nousresearch/hermes-3-llama-3.1-405b:free,meta-llama/llama-3.3-70b-instruct:free,google/gemma-4-31b-it:free",
     ).split(",")
     if m.strip()
 ]
