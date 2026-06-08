@@ -348,7 +348,8 @@ class AudioProducerAgent:
             )
             try:
                 ssml_src = segment.content_ssml if _HONOR_SSML_BREAKS else None
-                seg_audio = self._segment_to_audio(segment.content_plain, segment.segment_type, ssml_src)
+                plain_text = _clean_tts_text(segment.content_plain)
+                seg_audio = self._segment_to_audio(plain_text, segment.segment_type, ssml_src)
                 if i > 0:
                     audio_segments.append(segment_silence)
                 audio_segments.append(seg_audio)
@@ -707,8 +708,25 @@ class AudioProducerAgent:
 
 
 # ---------------------------------------------------------------------------
-# Shared text chunking utility
+# Shared text utilities
 # ---------------------------------------------------------------------------
+
+def _clean_tts_text(text: str) -> str:
+    """Normalize characters TTS engines narrate literally or mispronounce."""
+    replacements = [
+        ("—", ", "),   # em-dash → brief pause
+        ("–", ", "),   # en-dash
+        ("->", " to "),
+        ("→", " to "),
+        ("=>", " to "),
+        ("!=", " not equal to "),
+        (">=", " greater than or equal to "),
+        ("<=", " less than or equal to "),
+    ]
+    for bad, good in replacements:
+        text = text.replace(bad, good)
+    return text
+
 
 def _split_on_ssml_breaks(ssml: str) -> list[tuple[str, int]]:
     """Split SSML content on <break> tags, returning (plain_text, trailing_silence_ms) pairs.
@@ -727,7 +745,7 @@ def _split_on_ssml_breaks(ssml: str) -> list[tuple[str, int]]:
     i = 0
     while i < len(parts):
         raw_chunk = parts[i]
-        plain = _TAG_RE.sub("", raw_chunk).strip()
+        plain = _clean_tts_text(_TAG_RE.sub("", raw_chunk).strip())
         trailing_ms = int(parts[i + 1]) if i + 1 < len(parts) else 0
         if plain:
             result.append((plain, trailing_ms))
