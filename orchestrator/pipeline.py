@@ -414,9 +414,40 @@ def _build_expansion_diff(
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 class NewsFlowPipeline:
+    def __init__(self, user_id: str | None = None):
+        self._user_id = user_id
+        self._user_bio: str | None = None
+        self._user_email: str | None = None
+
+        if user_id:
+            self._load_user_from_db(user_id)
+
+    def _load_user_from_db(self, user_id: str) -> None:
+        try:
+            import os as _os
+            from supabase import create_client
+            url = _os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or _os.environ.get("SUPABASE_URL", "")
+            key = _os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+            if not url or not key:
+                log.warning("supabase_env_missing", user_id=user_id)
+                return
+            db = create_client(url, key)
+            result = db.table("users").select("email, bio").eq("id", user_id).maybe_single().execute()
+            if result.data:
+                self._user_email = result.data.get("email")
+                bio = result.data.get("bio", "").strip()
+                if bio:
+                    self._user_bio = bio
+            log.info("user_loaded", user_id=user_id, email=self._user_email, has_bio=bool(self._user_bio))
+        except Exception as exc:
+            log.warning("user_load_failed", user_id=user_id, error=str(exc))
+
     def run(self, date: str | None = None) -> Episode:
         date = date or datetime.now().strftime("%Y-%m-%d")
-        workspace = os.path.join("workspace", date)
+        if self._user_id:
+            workspace = os.path.join("workspace", self._user_id, date)
+        else:
+            workspace = os.path.join("workspace", date)
         logs_dir = os.path.join(workspace, "logs")
         Path(logs_dir).mkdir(parents=True, exist_ok=True)
 
@@ -431,7 +462,7 @@ class NewsFlowPipeline:
             tee.close()
 
     def _run(self, date: str, workspace: str, logs_dir: str) -> Episode:
-        log.info("pipeline_start", date=date, workspace=workspace)
+        log.info("pipeline_start", date=date, workspace=workspace, user_id=self._user_id)
 
         # ── Stage 1: Ingestion ───────────────────────────────────────────────
         raw_path = os.path.join(workspace, "raw_articles.json")
@@ -439,7 +470,7 @@ class NewsFlowPipeline:
             log.info("checkpoint_found", stage="ingestion")
             raw_articles = _load_json(raw_path, RawArticle)
         else:
-            raw_articles = IngestionAgent().run(date=date)
+            raw_articles = IngestionAgent(user_id=self._user_id).run(date=date)
             _save_json(raw_articles, raw_path)
             log.info("ingestion_complete", count=len(raw_articles))
 
@@ -451,7 +482,7 @@ class NewsFlowPipeline:
             log.info("checkpoint_found", stage="curator")
             curated = _load_json(curated_path, CuratedArticle)
         else:
-            curated = CuratorAgent().run(raw_articles)
+            curated = CuratorAgent(user_bio=self._user_bio).run(raw_articles)
             _save_json(curated, curated_path)
             log.info("curation_complete", count=len(curated))
 
@@ -460,7 +491,7 @@ class NewsFlowPipeline:
         # ── Stage 3: Summarization (includes scraping P0/P1) ────────────────
         summaries_path = os.path.join(workspace, "summaries.json")
         enriched_path = os.path.join(workspace, "curated_articles_enriched.json")
-        summarizer = SummarizerAgent()
+        summarizer = SummarizerAgent(user_bio=self._user_bio)
         summaries = summarizer.run(curated, partial_path=summaries_path)
         # Only write enriched if it doesn't exist — a resume run skips _fetch_full_text
         # and would overwrite the enriched file (with full_text populated) with nulls.
@@ -479,7 +510,7 @@ class NewsFlowPipeline:
             log.info("checkpoint_found", stage="script_writer")
             script = _load_json(script_path, PodcastScript)
         else:
-            script = ScriptWriterAgent().run(summaries, date)
+            script = ScriptWriterAgent(user_bio=self._user_bio).run(summaries, date)
 
         # Coverage gap detection — only run on freshly generated scripts.
         # If loading from checkpoint, expansion was already applied; skip re-detection.
@@ -507,7 +538,7 @@ class NewsFlowPipeline:
                 }
                 for seg in script.segments
             }
-            script = ScriptWriterAgent().expand_segments(script, summaries, date, coverage_gaps=gap_ids)
+            script = ScriptWriterAgent(user_bio=self._user_bio).expand_segments(script, summaries, date, coverage_gaps=gap_ids)
             _save_json(script, script_path)
 
             # Post-expansion gap re-check and diff logging
@@ -617,9 +648,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run NewsFlow pipeline")
     parser.add_argument("--date", help="Date in YYYY-MM-DD format (default: today)")
     parser.add_argument("--skip-email", action="store_true", help="Skip email delivery step")
+    parser.add_argument("--user-id", help="User UUID from DB (multi-user mode)")
     args = parser.parse_args()
 
-    episode = NewsFlowPipeline().run(date=args.date)
+    pipeline = NewsFlowPipeline(user_id=args.user_id)
+    episode = pipeline.run(date=args.date)
     print(f"Episode saved to: {episode.file_path} ({episode.duration_sec // 60} min)")
 
     if args.skip_email:
@@ -627,16 +660,22 @@ def main():
 
     run_date = Path(episode.file_path).parent.name
 
-    prefs_path = Path(__file__).parent.parent / "config" / "preferences.yaml"
-    with open(prefs_path) as f:
-        prefs = yaml.safe_load(f)
-    delivery_cfg = prefs.get("delivery", {})
-    recipient = delivery_cfg.get("recipient_email")
+    # Multi-user mode: use email from DB; single-tenant: fall back to preferences.yaml
+    recipient = pipeline._user_email
     if not recipient:
-        log.warning("email_skipped", reason="delivery.recipient_email not set in preferences.yaml")
+        prefs_path = Path(__file__).parent.parent / "config" / "preferences.yaml"
+        with open(prefs_path) as f:
+            prefs = yaml.safe_load(f)
+        delivery_cfg = prefs.get("delivery", {})
+        recipient = delivery_cfg.get("recipient_email")
+    if not recipient:
+        log.warning("email_skipped", reason="no recipient configured")
         return
 
-    workspace = Path(__file__).parent.parent / "workspace" / run_date
+    if args.user_id:
+        workspace = Path(__file__).parent.parent / "workspace" / args.user_id / run_date
+    else:
+        workspace = Path(__file__).parent.parent / "workspace" / run_date
     metadata_path = workspace / "episode_metadata.json"
     episode_metadata: dict = {}
     if metadata_path.exists():

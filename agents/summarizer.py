@@ -81,6 +81,9 @@ def _resolve_nltrack_url(url: str) -> str:
 
 
 class SummarizerAgent:
+    def __init__(self, user_bio: str | None = None):
+        self._user_bio = user_bio or "a software engineer building product awareness for AI PM and developer interviews at Series B+ startups"
+
     def run(self, curated_articles: list[CuratedArticle], partial_path: str | None = None) -> list[ArticleSummary]:
         # Load any already-completed summaries from a prior interrupted run
         summaries: list[ArticleSummary] = []
@@ -289,8 +292,7 @@ Each section needs 2-3 sentences. Stay within 400-500 words total."""
             model_hint="claude-haiku-4-5",
             system=(
                 "Write podcast-ready summaries for a daily AI/tech news podcast. "
-                "The listener is a software engineer building product awareness for AI PM "
-                "and developer interviews at Series B+ startups. "
+                f"The listener is {self._user_bio}. "
                 "Be concise and direct. This will be spoken aloud. Short sentences. Active voice."
             ),
             user=prompt,

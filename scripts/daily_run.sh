@@ -1,14 +1,15 @@
 #!/bin/bash
-# Daily NewsFlow pipeline wrapper — invoked by launchd at scheduled times.
+# Daily NewsFlow pipeline wrapper — invoked by launchd every 10 minutes.
+# Queries Supabase for active users whose delivery window has started, runs
+# per-user pipeline if no episode exists for today yet.
 # caffeinate prevents idle sleep mid-run.
 set -euo pipefail
 
 REPO="/Users/rushilkr/Projects/newsflow"
 VENV="$REPO/venv"
 TODAY="$(date +%Y-%m-%d)"
-LOCKFILE="$REPO/workspace/pipeline.lock"
 
-# launchd exports a minimal PATH — explicitly include Homebrew, system bins
+# launchd exports a minimal PATH
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 cd "$REPO"
@@ -17,39 +18,91 @@ LOG="$REPO/workspace/launchd_${TODAY}.log"
 mkdir -p "$REPO/workspace"
 
 exec >> "$LOG" 2>&1
-echo "=== NewsFlow daily run $(date '+%Y-%m-%d %H:%M:%S') ==="
-
-# Stale-run detection: kill any pipeline from a previous date still running
-if [[ -f "$LOCKFILE" ]]; then
-    LOCK_DATE="$(cut -d' ' -f1 "$LOCKFILE")"
-    LOCK_PID="$(cut -d' ' -f2 "$LOCKFILE")"
-    if kill -0 "$LOCK_PID" 2>/dev/null; then
-        if [[ "$LOCK_DATE" == "$TODAY" ]]; then
-            echo "Pipeline already running for today (PID $LOCK_PID) — skipping."
-            exit 0
-        else
-            echo "Killing stale run from $LOCK_DATE (PID $LOCK_PID)..."
-            kill "$LOCK_PID" 2>/dev/null || true
-            sleep 2
-        fi
-    fi
-    rm -f "$LOCKFILE"
-fi
-
-# Write lock: date + this shell's PID (caffeinate child inherits it)
-echo "$TODAY $$" > "$LOCKFILE"
-trap 'rm -f "$LOCKFILE"' EXIT
+echo "=== NewsFlow tick $(date '+%Y-%m-%d %H:%M:%S') ==="
 
 # Activate virtualenv
 if [[ -f "$VENV/bin/activate" ]]; then
     source "$VENV/bin/activate"
 else
-    echo "ERROR: venv not found at $VENV — run 'python -m venv .venv && pip install -r requirements.txt'"
+    echo "ERROR: venv not found at $VENV"
     exit 1
 fi
 
-# Run pipeline — caffeinate -dimsu covers display/disk/system/idle/user idle sleep
-echo "Starting pipeline..."
-caffeinate -dimsu python -m orchestrator.pipeline
+# Load env vars from .env (Supabase keys needed for user query below)
+if [[ -f "$REPO/.env" ]]; then
+    set -o allexport
+    source "$REPO/.env"
+    set +o allexport
+fi
 
-echo "=== Run complete $(date '+%Y-%m-%d %H:%M:%S') ==="
+# Query active users whose pipeline start window has arrived:
+#   pipeline_start = delivery_local_time - 30min
+#   fire when: now_local >= pipeline_start AND no episode for today yet
+USERS=$(python3 - <<'PYEOF'
+import os, json
+from datetime import datetime, timedelta
+import pytz
+
+try:
+    from supabase import create_client
+    url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        print("[]")
+        raise SystemExit(0)
+
+    db = create_client(url, key)
+    today = datetime.now(pytz.utc).strftime("%Y-%m-%d")
+
+    users = db.table("users").select("id, delivery_local_time, tz").eq("active", True).eq("episode_generation_enabled", True).execute().data
+    ready = []
+    for u in users:
+        tz = pytz.timezone(u.get("tz") or "Asia/Kolkata")
+        now_local = datetime.now(tz)
+        delivery_str = u.get("delivery_local_time") or "07:00"
+        hh, mm = map(int, delivery_str.split(":"))
+        delivery_dt = now_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        pipeline_start = delivery_dt - timedelta(minutes=30)
+
+        if now_local < pipeline_start:
+            continue  # not yet
+
+        # Check if episode already exists for today
+        ep = db.table("episodes").select("id, status").eq("user_id", u["id"]).eq("date", today).maybe_single().execute()
+        if ep.data and ep.data.get("status") not in ("failed",):
+            continue  # already done (or in progress)
+
+        ready.append(u["id"])
+
+    print(json.dumps(ready))
+except Exception as e:
+    import sys
+    print(f"User query failed: {e}", file=sys.stderr)
+    print("[]")
+PYEOF
+)
+
+if [[ "$USERS" == "[]" || -z "$USERS" ]]; then
+    echo "No users ready to run. Exiting."
+    exit 0
+fi
+
+echo "Users to run: $USERS"
+
+# Run pipeline per user
+echo "$USERS" | python3 -c "
+import sys, json, subprocess, os
+user_ids = json.load(sys.stdin)
+for uid in user_ids:
+    print(f'Starting pipeline for user {uid}...')
+    result = subprocess.run(
+        ['caffeinate', '-dimsu', sys.executable, '-m', 'orchestrator.pipeline', '--user-id', uid],
+        cwd=os.environ.get('REPO', '.'),
+    )
+    if result.returncode != 0:
+        print(f'Pipeline FAILED for user {uid} (exit {result.returncode})')
+    else:
+        print(f'Pipeline complete for user {uid}')
+" REPO="$REPO"
+
+echo "=== Tick complete $(date '+%Y-%m-%d %H:%M:%S') ==="

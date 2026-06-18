@@ -39,3 +39,4 @@ structlog>=24.0
 
 # Config
 PyYAML>=6.0
+supabase>=2.3.0

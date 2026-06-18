@@ -1,0 +1,340 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light mode: warm off-white paper, near-black ink, ink-red accent */
+  :root {
+    --color-paper: oklch(0.97 0.005 80);
+    --color-ink: oklch(0.18 0.01 80);
+    --color-ink-muted: oklch(0.45 0.007 80);
+    --color-ink-faint: oklch(0.72 0.005 80);
+    --color-accent: oklch(0.45 0.15 25);
+    --color-rule: oklch(0.18 0.01 80 / 0.11);
+    --color-surface: oklch(0.93 0.006 80);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-paper: oklch(0.16 0.008 60);
+      --color-ink: oklch(0.94 0.005 70);
+      --color-ink-muted: oklch(0.60 0.005 70);
+      --color-ink-faint: oklch(0.35 0.006 70);
+      --color-accent: oklch(0.65 0.12 25);
+      --color-rule: oklch(0.94 0.005 70 / 0.10);
+      --color-surface: oklch(0.21 0.008 60);
+    }
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: 'kern' 1, 'liga' 1, 'onum' 1;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-newsreader), Georgia, 'Times New Roman', serif;
+    min-height: 100svh;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-paper);
+  }
+}
+
+@layer components {
+
+  /* ── Typography helpers ─────────────────────────────────────────── */
+
+  .mono-caps {
+    font-family: var(--font-mono), 'Courier New', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+    line-height: 1;
+  }
+
+  .masthead-text {
+    font-family: var(--font-newsreader), Georgia, serif;
+    font-size: 0.8125rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-ink);
+    font-weight: 400;
+    line-height: 1;
+  }
+
+  /* ── Horizontal rule ─────────────────────────────────────────────── */
+
+  .rule {
+    border: none;
+    border-top: 1px solid var(--color-rule);
+  }
+
+  /* ── Custom checkbox ─────────────────────────────────────────────── */
+
+  .nf-checkbox {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    border: 1.5px solid var(--color-ink-faint);
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    margin-top: 2px;
+    transition: border-color 0.1s ease, background-color 0.1s ease;
+  }
+
+  .nf-checkbox:hover {
+    border-color: var(--color-ink-muted);
+  }
+
+  .nf-checkbox:checked {
+    background-color: var(--color-ink);
+    border-color: var(--color-ink);
+  }
+
+  .nf-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    top: 1px;
+    left: 4px;
+    width: 4px;
+    height: 7px;
+    border: 1.5px solid var(--color-paper);
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
+  }
+
+  .nf-checkbox:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* ── Form inputs ─────────────────────────────────────────────────── */
+
+  .field-input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--color-ink-faint);
+    color: var(--color-ink);
+    font-family: var(--font-newsreader), Georgia, serif;
+    font-size: 1rem;
+    line-height: 1.5;
+    padding: 8px 0 10px;
+    outline: none;
+    transition: border-color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .field-input:focus {
+    border-bottom-color: var(--color-ink);
+  }
+
+  .field-input::placeholder {
+    color: var(--color-ink-faint);
+    font-style: italic;
+  }
+
+  textarea.field-input {
+    resize: none;
+    min-height: 72px;
+    overflow-y: hidden;
+    padding-top: 8px;
+  }
+
+  /* ── Newsletter row label ─────────────────────────────────────────── */
+
+  .newsletter-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--color-rule);
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 44px;
+  }
+
+  .newsletter-row:first-child {
+    border-top: 1px solid var(--color-rule);
+  }
+
+  /* ── Submit button ───────────────────────────────────────────────── */
+
+  .submit-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-newsreader), Georgia, serif;
+    font-size: 0.9375rem;
+    letter-spacing: 0.01em;
+    padding: 13px 28px;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+    min-height: 48px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .submit-btn:hover {
+    opacity: 0.85;
+  }
+
+  .submit-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* ── Audio player ────────────────────────────────────────────────── */
+
+  .play-btn {
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--color-ink-faint);
+    background: transparent;
+    color: var(--color-ink);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+    border-radius: 50%;
+  }
+
+  .play-btn:hover {
+    background-color: var(--color-surface);
+    border-color: var(--color-ink-muted);
+  }
+
+  /* ── Progress bar ────────────────────────────────────────────────── */
+
+  .progress-track {
+    height: 1px;
+    background-color: var(--color-rule);
+    position: relative;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background-color: var(--color-ink-muted);
+    transform-origin: left;
+    transition: transform 0.1s linear;
+  }
+
+  /* ── Staggered page-load reveal ──────────────────────────────────── */
+
+  .reveal {
+    animation: revealUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes revealUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .delay-0  { animation-delay: 0ms; }
+  .delay-75 { animation-delay: 75ms; }
+  .delay-150 { animation-delay: 150ms; }
+  .delay-250 { animation-delay: 250ms; }
+  .delay-350 { animation-delay: 350ms; }
+  .delay-450 { animation-delay: 450ms; }
+  .delay-550 { animation-delay: 550ms; }
+  .delay-650 { animation-delay: 650ms; }
+
+  /* ── Confirmation fade-in ────────────────────────────────────────── */
+
+  .confirmation-enter {
+    animation: fadeIn 0.4s ease both;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* ── Error inline message ────────────────────────────────────────── */
+
+  .field-error {
+    font-family: var(--font-newsreader), Georgia, serif;
+    font-style: italic;
+    font-size: 0.875rem;
+    color: var(--color-accent);
+    margin-top: 5px;
+  }
+
+  /* ── Script excerpt section styling ─────────────────────────────── */
+
+  .excerpt-card {
+    background: var(--color-surface);
+    border-left: 2.5px solid var(--color-accent);
+    padding: 18px 20px 22px 18px;
+    transition: border-left-color 0.2s ease, border-left-width 0.2s ease;
+  }
+
+  .excerpt-card:hover {
+    border-left-width: 4px;
+    border-left-color: var(--color-ink);
+  }
+
+  .excerpt-badge {
+    display: inline-block;
+    font-family: var(--font-mono), 'Courier New', monospace;
+    font-size: 0.5625rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-paper);
+    background: var(--color-accent);
+    padding: 2px 7px 3px;
+    line-height: 1.5;
+  }
+
+  .excerpt-source-attr {
+    font-family: var(--font-mono), 'Courier New', monospace;
+    font-size: 0.5625rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  .excerpt-article-hed {
+    font-family: var(--font-newsreader), Georgia, serif;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--color-ink);
+  }
+
+  .excerpt-body {
+    font-family: var(--font-newsreader), Georgia, serif;
+    font-size: 0.9375rem;
+    line-height: 1.68;
+    color: var(--color-ink-muted);
+  }
+}

@@ -90,21 +90,20 @@ delivery:
   send_on_failure: true
 
 time_budget:
-  target_duration_min: 90
-  min_duration_min: 40  # trigger expansion_mode re-run if script falls below this
+  target_duration_min: 30  # soft target; India sources always included regardless
   p0_deep_dive:
-    duration_min_per_article: "5-7"
-    max_articles: 6
-    total_max_min: 35
+    duration_min_per_article: "4-6"
+    max_articles: 3
+    total_max_min: 14
   p1_standard:
     duration_min_per_article: "2-3"
-    max_articles: 12
-    total_max_min: 30
+    max_articles: 5
+    total_max_min: 8
   p2_quick_hit:
-    duration_sec_per_article: "30-60"
-    max_articles: 15
-    total_max_min: 12
+    duration_sec_per_article: "30-45"
+    max_articles: 5
+    total_max_min: 4
   overhead:
-    intro_min: 2
-    transitions_min: 5
-    closing_min: 5
+    intro_min: 1
+    transitions_min: 2
+    closing_min: 2

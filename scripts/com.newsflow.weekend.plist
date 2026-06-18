@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.newsflow.weekend</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/rushilkr/Projects/newsflow/scripts/daily_run.sh</string>
+    </array>
+
+    <!-- Two late-day runs to work around US newsletter send times:
+         Sun 10:00 IST (04:30 UTC): TechCrunch weekend edition (Sat 21:30 IST) + ET AI.
+                                     Thin episode — TLDR/ETtech don't send on weekends.
+         Mon 20:30 IST (15:00 UTC): Full Monday episode — TLDR AI arrives ~19:30 IST,
+                                     TechCrunch morning ~20:30 IST, ETtech ~20:25 IST.
+                                     Episode ready ~9 PM IST; listen Mon morning gym use Sun episode. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>0</integer>
+            <key>Hour</key><integer>10</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/rushilkr/Projects/newsflow/workspace/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/rushilkr/Projects/newsflow/workspace/launchd_stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/rushilkr</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

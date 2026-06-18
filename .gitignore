@@ -1,11 +1,12 @@
 # Secrets — never commit
 .env
+.env.local
+.env*.local
 credentials.json
 token.json
 *.json
 !package.json
 !pyproject.json
-
 # Pipeline outputs
 workspace/
 
@@ -31,3 +32,10 @@ Thumbs.db
 .worktrees/
 # Added by code-review-graph
 .code-review-graph/
+
+# Local Netlify folder
+.netlify
+
+web/node_modules
+web/.next
+

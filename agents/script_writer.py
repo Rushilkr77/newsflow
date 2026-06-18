@@ -42,16 +42,16 @@ _OPENROUTER_SCRIPT_MODELS: list[str] = [
 # Max retries on JSON parse failure or empty content (llama3.2:3b is stochastic)
 _MAX_RETRIES = 4
 
-# Per-segment token budgets. Sized to allow 45 min episodes with current article
-# volumes; will fill toward 90 min naturally as Phase 2 ET sources add more articles.
+# Per-segment token budgets. Sized for ~30 min episodes.
+# india_tech kept at 1536 — India segment is never cut regardless of overall length.
 _SEGMENT_MAX_TOKENS: dict[str, int] = {
     "opener": 512,
-    "ai_updates": 5120,      # 15-18 min target; P0 deep + P1 tight
-    "funding": 2048,
-    "india_tech": 1536,
-    "product_strategy": 2048,
-    "quick_hits": 1024,
-    "closing": 1024,
+    "ai_updates": 2560,      # 8-10 min target; max 2-3 P0 deep + P1 tight
+    "funding": 1280,
+    "india_tech": 1536,      # unchanged — India depth preserved
+    "product_strategy": 1280,
+    "quick_hits": 768,
+    "closing": 768,
 }
 
 # Max total summary chars passed to a single LLM call.
@@ -68,7 +68,7 @@ _CHARS_PER_SEC = 19  # conservative rounding keeps estimates slightly under actu
 
 # Instruction injected into both call paths to prevent verbatim hint copying.
 _INTERVIEW_EDGE_INSTRUCTION = """
-Note on interview_edge_hint: This is a SHORT TOPIC PROMPT — expand it into 2-3 sentences showing BOTH technical understanding AND product thinking. The listener is an SDE transitioning to PM.
+Note on interview_edge_hint: This is a SHORT TOPIC PROMPT — expand it into 2-3 sentences showing BOTH technical understanding AND product thinking.
 
 Bad (verbatim copy): "here's your edge: AI in enterprises"
 Bad (buzzwords only): "here's your edge: enterprise AI is about augmenting decisions at scale"
@@ -100,8 +100,8 @@ _CATEGORY_TO_SEGMENT = {
     Category.POLICY_SAFETY:       "quick_hits",
 }
 
-_SYSTEM_PROMPT = """You are the script writer for "NewsFlow" — a daily AI tech podcast.
-Write for a single host narrating to a listener who's a software engineer building product awareness.
+_SYSTEM_PROMPT_TEMPLATE = """You are the script writer for "NewsFlow" — a daily AI tech podcast.
+Write for a single host narrating to a listener who is {user_bio}.
 
 Voice guidelines:
 - Sound like a sharp, opinionated tech journalist — not a newsreader. Have a point of view.
@@ -135,7 +135,7 @@ Voice guidelines:
 - End each P0 story with: "If someone asks you about this in an interview, here's your edge: [INTERVIEW EDGE insight]"
 - Quick hits: rapid-fire with energy, "In quick hits: [story 1]. [story 2]. [story 3]."
 - You may editorialize on the *implications* of facts in the summaries — what it means, why it matters, what changes. Never invent new facts, names, numbers, or quotes.
-- BREVITY IS A FEATURE. If a story doesn't yield a crisp PM takeaway in 2 sentences, move on. A well-covered 3-minute story should be 3 minutes — not padded to 6. Target total episode ~45 minutes.
+- BREVITY IS A FEATURE. If a story doesn't yield a crisp PM takeaway in 2 sentences, move on. A well-covered 3-minute story should be 3 minutes — not padded to 6. Target total episode ~30 minutes.
 
 CRITICAL — Factual grounding: Only use facts, names, product names, statistics, and quotes
 that appear in the article summaries provided. Do not invent, extrapolate, or add any fact
@@ -148,6 +148,10 @@ _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
 class ScriptWriterAgent:
+    def __init__(self, user_bio: str | None = None):
+        bio = user_bio or "a software engineer building product awareness for AI PM and developer interviews at Series B+ startups"
+        self._system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(user_bio=bio)
+
     def run(
         self,
         summaries: list[ArticleSummary],
@@ -515,7 +519,7 @@ Articles:
             try:
                 text = chat(
                     model_hint="claude-sonnet-4-6",
-                    system=_SYSTEM_PROMPT,
+                    system=self._system_prompt,
                     user=user_prompt,
                     max_tokens=max_tokens,
                     local_model_override=_SCRIPT_LOCAL_MODEL,
@@ -604,7 +608,7 @@ Articles:
             try:
                 raw = chat(
                     model_hint="claude-sonnet-4-6",
-                    system=_SYSTEM_PROMPT,
+                    system=self._system_prompt,
                     user=user_prompt,
                     max_tokens=max_tokens,
                     local_model_override=_SCRIPT_LOCAL_MODEL,
@@ -766,8 +770,8 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                 "Strictly base previews on the section topics provided below. Do not invent."
             ),
             "ai_updates": (
-                "Duration: 15-18 minutes. "
-                "P0 stories: deep dive, 3-4 minutes each (what happened → technical angle → PM takeaway + INTERVIEW EDGE). Cover max 3 P0 stories. "
+                "Duration: 8-10 minutes. "
+                "P0 stories: deep dive, 3-4 minutes each (what happened → technical angle → PM takeaway + INTERVIEW EDGE). Cover max 2-3 P0 stories. "
                 "P1 stories: 60-90 seconds each (what happened in 2-3 sentences + 1 crisp PM takeaway). "
                 "P2 stories: skip — they belong in quick_hits. "
                 + (
@@ -779,8 +783,8 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                 "End EVERY P0 story with the INTERVIEW EDGE insight. Move on once the key insight is clear."
             ),
             "funding": (
-                "Duration: 6-8 minutes. "
-                "Cover top 3-4 funding rounds: round size + lead backer → what valuation implies → one PM insight. "
+                "Duration: 3-4 minutes. "
+                "Cover top 2-3 funding rounds: round size + lead backer → what valuation implies → one PM insight. "
                 "1 minute per story max. If more rounds exist, name them in one quick-list sentence at the end. "
                 + (
                     "EXPANSION MODE — cover any missed funding story now. Add: what the round signals for the ecosystem + PM angle. "
@@ -799,8 +803,8 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                 + "Open with a fresh segment bridge into India tech — do not say 'Moving on' or 'Now a look at'."
             ),
             "product_strategy": (
-                "Duration: 5-7 minutes. Industry strategy, SaaS disruption, Series B+ moves. "
-                "Top 2-3 stories: strategic move → who wins/loses → one PM decision framework angle. "
+                "Duration: 3-4 minutes. Industry strategy, SaaS disruption, Series B+ moves. "
+                "Top 1-2 stories: strategic move → who wins/loses → one PM decision framework angle. "
                 "Keep punchy — strategy stories land better as crisp insights than long explanations. "
                 + (
                     "EXPANSION MODE — cover any missed strategy story now. Focus on the business model angle and PM takeaway. "
@@ -809,7 +813,7 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
                 + "Open with a fresh segment bridge into product and strategy — do not say 'Moving on' or 'Time for product'."
             ),
             "quick_hits": (
-                "Duration: 3-4 minutes. Rapid-fire — one-liner per story: title paraphrase + one sentence on why it matters. "
+                "Duration: 2 minutes. Rapid-fire — one-liner per story: title paraphrase + one sentence on why it matters. "
                 "No interview edges here, no deep dives. Move fast. "
                 + (
                     "EXPANSION MODE — give each story 2 sentences max. No more. "

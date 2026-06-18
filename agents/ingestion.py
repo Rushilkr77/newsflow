@@ -137,7 +137,8 @@ def _build_source_routing(senders_config: dict) -> dict:
 
 
 class IngestionAgent:
-    def __init__(self):
+    def __init__(self, user_id: str | None = None):
+        self._user_id = user_id
         self._service = None
         self._senders_config = _load_senders_config()
         self._gmail_query = _build_gmail_query(self._senders_config)
@@ -324,6 +325,36 @@ class IngestionAgent:
         return filtered
 
     def _get_gmail_service(self):
+        if self._user_id:
+            return self._get_gmail_service_from_db(self._user_id)
+        return self._get_gmail_service_from_file()
+
+    def _get_gmail_service_from_db(self, user_id: str):
+        from supabase import create_client
+        url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        db = create_client(url, key)
+        result = db.table("gmail_credentials").select("refresh_token_encrypted").eq("user_id", user_id).maybe_single().execute()
+        if not result.data:
+            raise RuntimeError(f"No Gmail credentials found for user {user_id}")
+        refresh_token = result.data["refresh_token_encrypted"]
+
+        creds_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "credentials.json")
+        import json as _json
+        client_info = _json.loads(Path(creds_path).read_text())
+        web = client_info.get("web") or client_info.get("installed") or {}
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=web["client_id"],
+            client_secret=web["client_secret"],
+            scopes=SCOPES,
+        )
+        creds.refresh(Request())
+        return build("gmail", "v1", credentials=creds)
+
+    def _get_gmail_service_from_file(self):
         creds_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "credentials.json")
         token_path = os.environ.get("GMAIL_TOKEN_PATH", "token.json")
 

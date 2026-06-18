@@ -28,17 +28,17 @@ Read these files in order and report counts at each stage:
 | `curated_articles.json` | Count P0/P1/P2/P3 per category | Priority breakdown table |
 | `curated_articles_enriched.json` | Full scrape analysis — see Step 2b | Fetch source breakdown |
 | `summaries.json` | Count total summaries | Should match P0+P1+P2 count |
-| `podcast_script.json` | Count segments, total_estimated_duration_min | Duration vs 40-90 min target |
+| `podcast_script.json` | Count segments, total_estimated_duration_min | Report duration (no target range — flexible) |
 
 **Expected funnel:**
 - Raw: 60-80 articles
-- Curated: 25-35 articles (P0: ≤6, P1: ≤12, P2: ≤15)
+- Curated: 15-25 articles (P0: ≤3, P1: ≤5, P2: ≤5, plus all India articles)
 - P0+P1 full-text scraped: >80% (flag if <60%)
 - Snippet-only P0: 0 (any is a quality risk — flag by name)
 - Summaries: same count as curated P0+P1+P2
-- Episode: **40-90 minutes** (from `preferences.yaml` `time_budget.target_duration_min: 90`, min: 40)
+- Episode: report duration as-is; **length is flexible, not a pass/fail target**
 
-Flag any stage where numbers fall outside expected range.
+Flag any stage where counts fall outside expected range (except episode duration).
 
 ## Step 2b — Content fetch quality
 
@@ -92,8 +92,7 @@ Flag any summary where header count falls below minimum.
 
 From `podcast_script.json`:
 
-1. **Duration**: `total_estimated_duration_min` — flag if outside **40-90 min**
-   - Targets from `preferences.yaml`: `target_duration_min: 90`, `min_duration_min: 40`
+1. **Duration**: `total_estimated_duration_min` — report value only; **episode length is flexible, not flagged**.
    - Estimated duration uses `_CHARS_PER_SEC=19` (Chatterbox/F5-TTS pace, calibrated 2026-05-12).
      At 19 chars/sec the estimate should closely match actual audio. Cross-check with
      `duration_sec` in `episode_metadata.json` (actual audio) if it exists.
@@ -104,7 +103,7 @@ From `podcast_script.json`:
 4. **SSML check**: Sample `content_ssml` from the `ai_updates` segment — does it contain `<break` tags? Does `content_plain` exist and differ from SSML?
 5. **Opener quality**: Read the `opener` segment — does it hook with a specific story, or is it generic?
 
-**Note**: There is no tighten-pass in the current codebase. If duration exceeds 50 min, flag it as an overrun but do not look for a tighten-pass — it is not implemented.
+**Note**: Episode length is flexible — do not flag overruns or underruns. There is no tighten-pass in the current codebase.
 
 ## Step 5 — Source coverage check
 
@@ -188,7 +187,7 @@ P1 "{title}": 87 words ✗ (target 100-200)
 P2 "{title}": 41 words ✓
 
 ### Script Quality
-Duration: 47 min ✓  (target 40-90 min)
+Duration: 47 min
 Segments: opener ✓ ai_updates ✓ funding ✓ india_tech ✗ product_strategy ✓ quick_hits ✓ closing ✓
 Top takeaways: 3 ✓
 SSML present: ✓

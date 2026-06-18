@@ -65,9 +65,11 @@ _FUNDING_SIGNALS = re.compile(
 
 
 class CuratorAgent:
-    def __init__(self):
+    def __init__(self, user_bio: str | None = None):
         self._prefs = self._load_prefs()
         self._embed_model = None  # lazy-loaded on first semantic dedup call
+        if user_bio:
+            self._prefs.setdefault("user_profile", {})["role"] = user_bio
 
     def run(self, raw_articles: list[RawArticle]) -> list[CuratedArticle]:
         log.info("curator_start", input_count=len(raw_articles))
@@ -661,6 +663,22 @@ strategic moves (acquisitions, exec poaching) are P0 — not P1 or P2."""
             if p2_sec + a.estimated_podcast_duration_sec <= p2_max_sec:
                 selected.append(a)
                 p2_sec += a.estimated_podcast_duration_sec
+
+        # India guarantee: ettech/et_ai articles never cut by time budget.
+        # Any non-P3 India article not already selected is appended unconditionally.
+        selected_ids = {id(a) for a in selected}
+        india_force = [
+            a for a in (p0 + p1 + p2)
+            if a.source in self._INDIA_SOURCES and id(a) not in selected_ids
+        ]
+        if india_force:
+            import structlog as _sl
+            _sl.get_logger().info(
+                "india_articles_force_kept",
+                count=len(india_force),
+                titles=[a.title[:60] for a in india_force],
+            )
+        selected.extend(india_force)
 
         return selected
 
