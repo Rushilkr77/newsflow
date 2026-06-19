@@ -75,14 +75,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Something went wrong. Try again.' }, { status: 500 })
   }
 
-  if (autoApprove && magic_token) {
-    sendMagicLink(email, magic_token).catch((err) =>
-      console.error('Magic link email failed:', err)
-    )
-  } else {
-    sendAdminAlert({ email, newsletter_picks: newsletters, other_text }).catch((err) =>
-      console.error('Admin alert email failed:', err)
-    )
+  try {
+    if (autoApprove && magic_token) {
+      await sendMagicLink(email, magic_token)
+    } else {
+      await sendAdminAlert({ email, newsletter_picks: newsletters, other_text })
+    }
+  } catch (err) {
+    console.error('Email send failed:', err)
+    // DB row already written — don't fail the request, but log it
   }
 
   return NextResponse.json({
