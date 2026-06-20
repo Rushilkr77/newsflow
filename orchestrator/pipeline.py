@@ -697,11 +697,13 @@ def main():
         log.warning("drive_upload_failed", error=str(exc))
 
     from delivery.email_sender import send_episode_email
+    admin_email = os.environ.get("SMTP_USER", "")
+    is_admin = recipient == admin_email
     try:
         send_episode_email(
             recipient=recipient,
             mp3_path=Path(episode.file_path),
-            review_md_path=review_path,
+            review_md_path=review_path if is_admin else None,
             episode_metadata=episode_metadata,
             drive_link=drive_link,
         )

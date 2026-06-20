@@ -339,16 +339,16 @@ class IngestionAgent:
             raise RuntimeError(f"No Gmail credentials found for user {user_id}")
         refresh_token = result.data["refresh_token_encrypted"]
 
-        creds_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "credentials.json")
-        import json as _json
-        client_info = _json.loads(Path(creds_path).read_text())
-        web = client_info.get("web") or client_info.get("installed") or {}
+        client_id = os.environ.get("WEB_GOOGLE_CLIENT_ID")
+        client_secret = os.environ.get("WEB_GOOGLE_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise RuntimeError("WEB_GOOGLE_CLIENT_ID / WEB_GOOGLE_CLIENT_SECRET not set in .env")
         creds = Credentials(
             token=None,
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=web["client_id"],
-            client_secret=web["client_secret"],
+            client_id=client_id,
+            client_secret=client_secret,
             scopes=SCOPES,
         )
         creds.refresh(Request())
