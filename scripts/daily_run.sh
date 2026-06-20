@@ -68,8 +68,8 @@ try:
             continue  # not yet
 
         # Check if episode already exists for today
-        ep = db.table("episodes").select("id, status").eq("user_id", u["id"]).eq("date", today).maybe_single().execute()
-        if ep.data and ep.data.get("status") not in ("failed",):
+        ep_result = db.table("episodes").select("id, status").eq("user_id", u["id"]).eq("date", today).limit(1).execute()
+        if ep_result.data and ep_result.data[0].get("status") not in ("failed",):
             continue  # already done (or in progress)
 
         ready.append(u["id"])
@@ -91,14 +91,23 @@ echo "Users to run: $USERS"
 
 # Run pipeline per user
 echo "$USERS" | python3 -c "
-import sys, json, subprocess, os
+import sys, json, subprocess, os, datetime
+from supabase import create_client
+url = os.environ.get('NEXT_PUBLIC_SUPABASE_URL') or os.environ.get('SUPABASE_URL', '')
+key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+db = create_client(url, key)
+today = datetime.date.today().isoformat()
+
 user_ids = json.load(sys.stdin)
 for uid in user_ids:
     print(f'Starting pipeline for user {uid}...')
+    db.table('episodes').upsert({'user_id': uid, 'date': today, 'status': 'generating'}, on_conflict='user_id,date').execute()
     result = subprocess.run(
         ['caffeinate', '-dimsu', sys.executable, '-m', 'orchestrator.pipeline', '--user-id', uid],
         cwd=os.environ.get('REPO', '.'),
     )
+    status = 'ready' if result.returncode == 0 else 'failed'
+    db.table('episodes').update({'status': status}).eq('user_id', uid).eq('date', today).execute()
     if result.returncode != 0:
         print(f'Pipeline FAILED for user {uid} (exit {result.returncode})')
     else:
