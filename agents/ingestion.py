@@ -343,13 +343,15 @@ class IngestionAgent:
         client_secret = os.environ.get("WEB_GOOGLE_CLIENT_SECRET")
         if not client_id or not client_secret:
             raise RuntimeError("WEB_GOOGLE_CLIENT_ID / WEB_GOOGLE_CLIENT_SECRET not set in .env")
+        # Don't pass scopes= on refresh — passing scopes causes Google to reject the
+        # refresh if the stored token was granted for fewer scopes (invalid_scope/unauthorized_client).
+        # The token refreshes using whatever scopes were originally granted during OAuth.
         creds = Credentials(
             token=None,
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=client_id,
             client_secret=client_secret,
-            scopes=SCOPES,
         )
         creds.refresh(Request())
         return build("gmail", "v1", credentials=creds)

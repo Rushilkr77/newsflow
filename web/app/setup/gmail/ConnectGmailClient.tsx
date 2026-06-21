@@ -67,7 +67,13 @@ function ConnectGmailInner({ email }: Props) {
             </p>
           )}
 
-          {error && error !== 'wrong_account' && error !== 'declined' && (
+          {error === 'gmail_scope_missing' && (
+            <p className="mt-6 font-serif italic text-sm text-accent">
+              Gmail access was not granted. Make sure to allow the Gmail permission on Google's consent screen.
+            </p>
+          )}
+
+          {error && error !== 'wrong_account' && error !== 'declined' && error !== 'gmail_scope_missing' && (
             <p className="mt-6 font-serif italic text-sm text-accent">
               Something went wrong. Try again.
             </p>

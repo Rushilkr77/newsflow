@@ -37,6 +37,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${baseUrl}/setup/gmail?error=no_refresh_token`)
   }
 
+  // Verify gmail.readonly was actually granted (user may have unchecked it on consent screen)
+  const grantedScopes = (tokens.scope ?? '').split(' ')
+  if (!grantedScopes.includes('https://www.googleapis.com/auth/gmail.readonly')) {
+    return NextResponse.redirect(`${baseUrl}/setup/gmail?error=gmail_scope_missing`)
+  }
+
   // Verify the authed Google account matches the signup email
   oauth2Client.setCredentials(tokens)
   const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client })

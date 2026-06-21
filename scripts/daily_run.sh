@@ -90,7 +90,7 @@ fi
 echo "Users to run: $USERS"
 
 # Run pipeline per user
-echo "$USERS" | python3 -c "
+python3 -c "
 import sys, json, subprocess, os, datetime
 from supabase import create_client
 url = os.environ.get('NEXT_PUBLIC_SUPABASE_URL') or os.environ.get('SUPABASE_URL', '')
@@ -98,20 +98,33 @@ key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 db = create_client(url, key)
 today = datetime.date.today().isoformat()
 
-user_ids = json.load(sys.stdin)
+# Reset episodes stuck in 'generating' for more than 3 hours — pipeline died before status update.
+from datetime import timezone
+cutoff = (datetime.datetime.now(timezone.utc) - datetime.timedelta(hours=3)).isoformat()
+stale = db.table('episodes').select('user_id').eq('date', today).eq('status', 'generating').lt('updated_at', cutoff).execute()
+for row in (stale.data or []):
+    db.table('episodes').update({'status': 'failed'}).eq('user_id', row['user_id']).eq('date', today).execute()
+    print(f'Reset stale generating episode for user {row[\"user_id\"]}')
+
+user_ids = json.loads(os.environ.get('USERS_JSON', '[]'))
+PIPELINE_TIMEOUT_SEC = 7200  # 2 hours max per user pipeline
+
 for uid in user_ids:
     print(f'Starting pipeline for user {uid}...')
     db.table('episodes').upsert({'user_id': uid, 'date': today, 'status': 'generating'}, on_conflict='user_id,date').execute()
-    result = subprocess.run(
-        ['caffeinate', '-dimsu', sys.executable, '-m', 'orchestrator.pipeline', '--user-id', uid],
-        cwd=os.environ.get('REPO', '.'),
-    )
-    status = 'ready' if result.returncode == 0 else 'failed'
+    try:
+        result = subprocess.run(
+            ['caffeinate', '-dimsu', sys.executable, '-m', 'orchestrator.pipeline', '--user-id', uid],
+            cwd=os.environ.get('REPO', '.'),
+            timeout=PIPELINE_TIMEOUT_SEC,
+        )
+        status = 'ready' if result.returncode == 0 else 'failed'
+        msg = 'Pipeline complete' if result.returncode == 0 else f'Pipeline FAILED (exit {result.returncode})'
+    except subprocess.TimeoutExpired:
+        status = 'failed'
+        msg = f'Pipeline TIMEOUT after {PIPELINE_TIMEOUT_SEC // 60}min'
     db.table('episodes').update({'status': status}).eq('user_id', uid).eq('date', today).execute()
-    if result.returncode != 0:
-        print(f'Pipeline FAILED for user {uid} (exit {result.returncode})')
-    else:
-        print(f'Pipeline complete for user {uid}')
-" REPO="$REPO"
+    print(f'{msg} for user {uid}')
+" REPO="$REPO" USERS_JSON="$USERS"
 
 echo "=== Tick complete $(date '+%Y-%m-%d %H:%M:%S') ==="
