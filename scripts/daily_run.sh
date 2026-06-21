@@ -90,7 +90,7 @@ fi
 echo "Users to run: $USERS"
 
 # Run pipeline per user
-python3 -c "
+USERS_JSON="$USERS" REPO="$REPO" python3 -c "
 import sys, json, subprocess, os, datetime
 from supabase import create_client
 url = os.environ.get('NEXT_PUBLIC_SUPABASE_URL') or os.environ.get('SUPABASE_URL', '')
@@ -125,6 +125,6 @@ for uid in user_ids:
         msg = f'Pipeline TIMEOUT after {PIPELINE_TIMEOUT_SEC // 60}min'
     db.table('episodes').update({'status': status}).eq('user_id', uid).eq('date', today).execute()
     print(f'{msg} for user {uid}')
-" REPO="$REPO" USERS_JSON="$USERS"
+"
 
 echo "=== Tick complete $(date '+%Y-%m-%d %H:%M:%S') ==="
