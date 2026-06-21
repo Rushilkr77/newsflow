@@ -1,29 +1,19 @@
 """
-Send the daily NewsFlow episode (Drive link + review report) via Gmail SMTP.
-Reads SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_APP_PASSWORD from environment.
+Send the daily NewsFlow episode (Drive link + review report) via Resend.
+Reads RESEND_API_KEY from environment. Sends from hello@newsflow.ink.
 """
 import os
-import smtplib
 from datetime import date
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv(override=False)  # don't override vars already set by pipeline's load_dotenv
+load_dotenv(override=False)
 
 import structlog
 
 log = structlog.get_logger(__name__)
 
-
-def _smtp_config() -> dict:
-    return {
-        "host": os.environ.get("SMTP_HOST", "smtp.gmail.com"),
-        "port": int(os.environ.get("SMTP_PORT", "587")),
-        "user": os.environ["SMTP_USER"],
-        "password": os.environ["SMTP_APP_PASSWORD"],
-    }
+FROM = "NewsFlow <hello@newsflow.ink>"
 
 
 def _build_html(episode_metadata: dict, review_md: str | None, drive_link: str | None) -> str:
@@ -87,7 +77,13 @@ def send_episode_email(
     episode_metadata: dict,
     drive_link: str | None = None,
 ) -> None:
-    cfg = _smtp_config()
+    import resend
+
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY not set in .env")
+    resend.api_key = api_key
+
     run_date = episode_metadata.get("date", str(date.today()))
     title = episode_metadata.get("title", "NewsFlow Daily")
 
@@ -95,23 +91,22 @@ def send_episode_email(
     if review_md_path and review_md_path.exists():
         review_text = review_md_path.read_text(encoding="utf-8")
 
-    msg = MIMEMultipart("mixed")
-    msg["From"] = cfg["user"]
-    msg["To"] = recipient
-    msg["Subject"] = f"NewsFlow {run_date} — {title}"
-
-    html_part = MIMEText(_build_html(episode_metadata, review_text, drive_link), "html", "utf-8")
-    msg.attach(html_part)
-
+    attachments = []
     if review_text and review_md_path:
-        md_part = MIMEText(review_text, "plain", "utf-8")
-        md_part.add_header("Content-Disposition", "attachment", filename="review_report.md")
-        msg.attach(md_part)
+        import base64
+        attachments.append({
+            "filename": "review_report.md",
+            "content": base64.b64encode(review_text.encode()).decode(),
+        })
 
-    with smtplib.SMTP(cfg["host"], cfg["port"]) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.login(cfg["user"], cfg["password"])
-        smtp.sendmail(cfg["user"], [recipient], msg.as_bytes())
+    params: dict = {
+        "from": FROM,
+        "to": [recipient],
+        "subject": f"NewsFlow {run_date} — {title}",
+        "html": _build_html(episode_metadata, review_text, drive_link),
+    }
+    if attachments:
+        params["attachments"] = attachments
 
+    resend.Emails.send(params)
     log.info("email_sent", recipient=recipient, date=run_date, drive_link=drive_link)
