@@ -101,7 +101,7 @@ today = datetime.date.today().isoformat()
 # Reset episodes stuck in 'generating' for more than 3 hours — pipeline died before status update.
 from datetime import timezone
 cutoff = (datetime.datetime.now(timezone.utc) - datetime.timedelta(hours=3)).isoformat()
-stale = db.table('episodes').select('user_id').eq('date', today).eq('status', 'generating').lt('updated_at', cutoff).execute()
+stale = db.table('episodes').select('user_id').eq('date', today).eq('status', 'generating').lt('created_at', cutoff).execute()
 for row in (stale.data or []):
     db.table('episodes').update({'status': 'failed'}).eq('user_id', row['user_id']).eq('date', today).execute()
     print(f'Reset stale generating episode for user {row[\"user_id\"]}')
