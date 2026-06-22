@@ -28,6 +28,10 @@ else
     exit 1
 fi
 
+# Keep deps in sync with requirements.txt so a new dependency added in a commit
+# (e.g. resend) doesn't silently no-op at import time on the next scheduled tick.
+pip install -q -r "$REPO/requirements.txt"
+
 # Load env vars from .env (Supabase keys needed for user query below)
 if [[ -f "$REPO/.env" ]]; then
     set -o allexport

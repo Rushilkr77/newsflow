@@ -697,7 +697,7 @@ def main():
         log.warning("drive_upload_failed", error=str(exc))
 
     from delivery.email_sender import send_episode_email
-    admin_email = os.environ.get("SMTP_USER", "")
+    admin_email = os.environ.get("ADMIN_EMAIL", "rushilmisc77@gmail.com")
     is_admin = recipient == admin_email
     try:
         send_episode_email(
