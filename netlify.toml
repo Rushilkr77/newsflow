@@ -1,0 +1,19 @@
+[build]
+  base    = "web"
+  command = "npm run build"
+  publish = "web/.next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Local dev: `cd web && npm run dev`
+# Deploy: push to main → Netlify auto-builds from web/
+
+[[redirects]]
+  from = "http://newsflow.ink/*"
+  to   = "https://newsflow.ink/:splat"
+  status = 301
+  force  = true
