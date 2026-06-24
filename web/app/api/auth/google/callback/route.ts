@@ -73,5 +73,13 @@ export async function GET(req: NextRequest) {
   // Mark user active
   await db.from('users').update({ active: true }).eq('id', userId)
 
-  return NextResponse.redirect(`${baseUrl}/setup/sources`)
+  // First-time connect → set up sources; reconnect → go straight to dashboard
+  const { data: existingSources } = await db
+    .from('user_sources')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1)
+
+  const dest = existingSources && existingSources.length > 0 ? '/dashboard' : '/setup/sources'
+  return NextResponse.redirect(`${baseUrl}${dest}`)
 }

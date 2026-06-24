@@ -42,9 +42,12 @@ export default function LandingPage() {
         <header className="pt-8 pb-0 md:pt-12">
           <div className="flex flex-col gap-1.5 md:flex-row md:items-baseline md:justify-between md:gap-0 reveal delay-0">
             <span className="masthead-text">Newsflow</span>
-            <span className="font-mono text-2xs text-ink-muted tracking-wide">
-              {dateline}.
-            </span>
+            <div className="flex items-baseline gap-6">
+              <span className="font-mono text-2xs text-ink-muted tracking-wide">
+                {dateline}.
+              </span>
+              <a href="/login" className="mono-caps hover:text-ink transition-colors">Sign in</a>
+            </div>
           </div>
         </header>
 

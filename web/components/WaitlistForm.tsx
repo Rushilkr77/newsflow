@@ -18,6 +18,7 @@ type SubmitState =
   | { type: 'idle' }
   | { type: 'loading' }
   | { type: 'error'; message: string }
+  | { type: 'already_exists'; email: string }
   | { type: 'success'; email: string; count: number; status: 'approved' | 'pending' }
 
 function isValidEmail(email: string): boolean {
@@ -81,6 +82,11 @@ export default function WaitlistForm() {
         return
       }
 
+      if (data.already_signed_up) {
+        setState({ type: 'already_exists', email: data.email })
+        return
+      }
+
       setState({
         type: 'success',
         email: data.email,
@@ -90,6 +96,25 @@ export default function WaitlistForm() {
     } catch {
       setState({ type: 'error', message: 'Connection error. Check your internet and try again.' })
     }
+  }
+
+  if (state.type === 'already_exists') {
+    return (
+      <div className="confirmation-enter max-w-prose">
+        <p className="font-serif text-xl text-ink mb-4 leading-snug">
+          You already have an account.
+        </p>
+        <p className="font-serif text-sm text-ink leading-relaxed mb-8">
+          Sign in with the Google account linked to {state.email}.
+        </p>
+        <button
+          onClick={() => { window.location.href = '/login' }}
+          className="submit-btn"
+        >
+          Sign in
+        </button>
+      </div>
+    )
   }
 
   if (state.type === 'success') {
