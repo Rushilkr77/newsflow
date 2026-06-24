@@ -14,7 +14,7 @@ export async function GET() {
 
   const url = oauth2Client.generateAuthUrl({
     access_type: 'online',
-    prompt: 'select_account',
+    prompt: 'login',
     scope: [
       'openid',
       'https://www.googleapis.com/auth/userinfo.email',
