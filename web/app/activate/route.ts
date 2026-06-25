@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   } else {
     const { data: newUser, error } = await db
       .from('users')
-      .insert({ email: signup.email })
+      .insert({ email: signup.email, active: true })
       .select('id')
       .single()
 
@@ -70,5 +70,5 @@ export async function GET(req: NextRequest) {
     path: '/',
   })
 
-  return NextResponse.redirect(`${BASE()}/setup/gmail`)
+  return NextResponse.redirect(`${BASE()}/setup/sources`)
 }

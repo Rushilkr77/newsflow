@@ -72,7 +72,22 @@ class CuratorAgent:
             self._prefs.setdefault("user_profile", {})["role"] = user_bio
 
     def run(self, raw_articles: list[RawArticle]) -> list[CuratedArticle]:
-        log.info("curator_start", input_count=len(raw_articles))
+        """Full pipeline: dedup → rank. Preserved for single-tenant backward-compat."""
+        return self.run_rank(self.run_dedup(raw_articles))
+
+    def run_dedup(self, raw_articles: list[RawArticle]) -> list[dict]:
+        """
+        Phase A (global): URL-dedup → semantic-dedup → cross-source overlap marking.
+        Returns a list of pool element dicts:
+          {
+            "article": RawArticle,  # canonical article (full_text populated by ScraperAgent)
+            "all_sources": list[Source],
+            "dedup_group_id": str | None,
+            "context_only": bool,
+          }
+        No LLM calls — only local sentence-transformer embeddings.
+        """
+        log.info("curator_dedup_start", input_count=len(raw_articles))
 
         deduped = self._url_dedup(raw_articles)
         log.info("url_dedup_complete", count=len(deduped))
@@ -84,6 +99,24 @@ class CuratorAgent:
         deduped = [item for item in deduped if item["article"].id in kept_ids]
 
         deduped = self._mark_cross_source_overlap(deduped)
+        log.info("curator_dedup_complete", count=len(deduped))
+
+        return deduped
+
+    def run_rank(self, deduped: list[dict]) -> list[CuratedArticle]:
+        """
+        Phase B (per-user): LLM classify → time budget.
+        Consumes the output of run_dedup() (pool element dicts).
+        full_text is copied from the pool article into the CuratedArticle so the
+        summarizer's _fetch_full_text skips already-scraped articles.
+        """
+        log.info("curator_rank_start", input_count=len(deduped))
+        # Pool stores articles as plain dicts (model_dump); normalize to Pydantic models
+        deduped = [
+            {**item, "article": RawArticle.model_validate(item["article"])}
+            if isinstance(item["article"], dict) else item
+            for item in deduped
+        ]
 
         curated = self._classify(deduped)
         log.info("classification_complete", count=len(curated))
@@ -301,23 +334,46 @@ class CuratorAgent:
         text = f"{title} {snippet[:200]}"
         return bool(_FUNDING_SIGNALS.search(text))
 
-    # ET sources always belong in india_tech regardless of LLM classification
     _INDIA_SOURCES: frozenset[Source] = frozenset({Source.ETTECH, Source.ET_AI})
+
+    # LLM chose a clearly-global category — trust it even for ET sources.
+    # ET covers global AI/tech news; forcing those to india_tech hides them.
+    _GLOBAL_TECH_CATEGORIES: frozenset[Category] = frozenset({
+        Category.BIG_TECH_LAUNCHES,
+        Category.AI_PRODUCTS_TOOLS,
+        Category.PRODUCT_INNOVATIONS,
+    })
 
     def _apply_funding_override(self, articles: list[CuratedArticle]) -> None:
         """
         Post-classification funding/india routing override (in-place).
 
-        Two rules applied in one pass:
-        1. ET sources (ettech, et_ai) → always india_tech. The LLM often
-           misroutes Indian company funding rounds to funding_ma or
-           industry_strategy; source is a stronger signal than content.
-        2. Non-ET articles with explicit funding/M&A signals → funding_ma,
-           unless already correctly classified as india_tech or funding_ma.
+        Priority order for ET sources (ettech, et_ai):
+        1. Funding signals present → funding_ma (funding round is the story,
+           India geography surfaces in narration, not segment routing).
+        2. LLM classified as clearly-global tech → trust LLM (ET covers global news).
+        3. Anything else → india_tech default.
+
+        For non-ET sources: explicit funding/M&A signals → funding_ma unless
+        already correctly classified as india_tech or funding_ma.
         """
         for ca in articles:
+            has_funding = self._has_funding_signals(ca.title, ca.snippet or "")
             if ca.source in self._INDIA_SOURCES:
-                if ca.category != Category.INDIA_TECH:
+                if has_funding:
+                    # Funding round from Indian source → funding_ma segment.
+                    # Keeps india_tech segment focused on ecosystem, not deal flow.
+                    if ca.category != Category.FUNDING_MA:
+                        log.info(
+                            "india_funding_override",
+                            title=ca.title[:60],
+                            original_category=ca.category.value,
+                        )
+                        ca.category = Category.FUNDING_MA
+                elif ca.category in self._GLOBAL_TECH_CATEGORIES:
+                    # Global news (Chinese AI, US big tech) covered by ET → keep LLM call.
+                    pass
+                elif ca.category != Category.INDIA_TECH:
                     log.info(
                         "india_source_override",
                         title=ca.title[:60],
@@ -325,9 +381,9 @@ class CuratorAgent:
                     )
                     ca.category = Category.INDIA_TECH
             elif (
-                ca.category != Category.FUNDING_MA
+                has_funding
+                and ca.category != Category.FUNDING_MA
                 and ca.category != Category.INDIA_TECH
-                and self._has_funding_signals(ca.title, ca.snippet or "")
             ):
                 log.info(
                     "funding_override",
@@ -503,6 +559,7 @@ Return ONLY a JSON array (no markdown, no explanation):
                         item_data.get("estimated_podcast_seconds") or 120
                     ),
                     snippet=a.snippet,
+                    full_text=a.full_text,  # propagate scraped content from Phase A pool
                     discussion_hooks=item_data.get("discussion_hooks", []),
                     context_only=is_context_only,
                 )
