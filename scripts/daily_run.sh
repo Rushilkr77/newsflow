@@ -2,6 +2,8 @@
 # Daily NewsFlow pipeline wrapper — invoked by launchd every 10 minutes.
 # Queries Supabase for active users whose delivery window has started, runs
 # per-user pipeline if no episode exists for today yet.
+# After each tick, schedules a pmset wake just before the next user's pipeline
+# window so the Mac wakes from lid-closed sleep automatically.
 # caffeinate prevents idle sleep mid-run.
 set -euo pipefail
 
@@ -34,6 +36,65 @@ if [[ -f "$REPO/.env" ]]; then
     source "$REPO/.env"
     set +o allexport
 fi
+
+# Schedule a pmset wake 5 minutes before the next upcoming pipeline_start
+# across all active users. Cancels any previously scheduled wake first.
+# Requires passwordless sudo for pmset — see scripts/sudoers_newsflow snippet.
+schedule_next_wake() {
+    WAKE_TIME=$(python3 - <<'PYEOF'
+import os, sys
+from datetime import datetime, timedelta
+import pytz
+
+try:
+    from supabase import create_client
+    url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        sys.exit(0)
+
+    db = create_client(url, key)
+    users = db.table("users").select("delivery_local_time, tz") \
+               .eq("active", True).eq("episode_generation_enabled", True) \
+               .execute().data
+
+    now_utc = datetime.now(pytz.utc)
+    next_start_utc = None
+
+    for u in users:
+        tz = pytz.timezone(u.get("tz") or "Asia/Kolkata")
+        now_local = datetime.now(tz)
+        hh, mm = map(int, (u.get("delivery_local_time") or "07:00").split(":"))
+        delivery_dt = now_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        pipeline_start = delivery_dt - timedelta(minutes=30)
+
+        # If already passed today, push to tomorrow
+        if pipeline_start.astimezone(pytz.utc) <= now_utc:
+            pipeline_start += timedelta(days=1)
+
+        start_utc = pipeline_start.astimezone(pytz.utc)
+        if next_start_utc is None or start_utc < next_start_utc:
+            next_start_utc = start_utc
+
+    if next_start_utc:
+        wake_utc = next_start_utc - timedelta(minutes=5)
+        # pmset expects local time; use system local timezone
+        local_tz = datetime.now().astimezone().tzinfo
+        print(wake_utc.astimezone(local_tz).strftime("%m/%d/%Y %H:%M:%S"))
+
+except Exception as e:
+    print(f"schedule_next_wake error: {e}", file=sys.stderr)
+PYEOF
+    )
+
+    if [[ -n "$WAKE_TIME" ]]; then
+        echo "Scheduling next wake: $WAKE_TIME"
+        sudo pmset schedule cancelall 2>/dev/null || true
+        sudo pmset schedule wake "$WAKE_TIME" && echo "Wake scheduled OK" || echo "WARN: pmset failed (sudoers not configured?)"
+    else
+        echo "No upcoming wake to schedule"
+    fi
+}
 
 # Query active users whose pipeline start window has arrived:
 #   pipeline_start = delivery_local_time - 30min
@@ -83,13 +144,40 @@ PYEOF
 )
 
 if [[ "$USERS" == "[]" || -z "$USERS" ]]; then
-    echo "No users ready to run. Exiting."
+    echo "No users ready to run."
+    schedule_next_wake
+    echo "=== Tick complete $(date '+%Y-%m-%d %H:%M:%S') ==="
     exit 0
 fi
 
 echo "Users to run: $USERS"
 
-# Run pipeline per user
+# Run Phase A (global enrich) once — build shared pool before per-user runs.
+# The pool.json existence guard in GlobalEnrichPipeline makes this idempotent across
+# 10-min ticks; subsequent ticks skip Phase A instantly.
+REPO="$REPO" python3 -c "
+import sys, subprocess, os, datetime, json, pathlib
+
+today = datetime.date.today().isoformat()
+pool_path = pathlib.Path(os.environ.get('REPO', '.')).joinpath('workspace', '_shared', today, 'pool.json')
+
+if pool_path.exists():
+    print(f'Phase A already done for {today}, pool at {pool_path}')
+else:
+    print(f'Running Phase A (global enrich) for {today}...')
+    try:
+        result = subprocess.run(
+            ['caffeinate', '-dimsu', sys.executable, '-m', 'orchestrator.pipeline', '--phase', 'global'],
+            cwd=os.environ.get('REPO', '.'),
+            timeout=3600,  # 1 hour max for global phase
+        )
+        if result.returncode != 0:
+            print(f'Phase A FAILED (exit {result.returncode}) — per-user runs will fail fast')
+    except subprocess.TimeoutExpired:
+        print('Phase A TIMEOUT after 60min — per-user runs will fail fast')
+"
+
+# Run pipeline per user (Phase B)
 USERS_JSON="$USERS" REPO="$REPO" python3 -c "
 import sys, json, subprocess, os, datetime
 from supabase import create_client
@@ -110,7 +198,7 @@ user_ids = json.loads(os.environ.get('USERS_JSON', '[]'))
 PIPELINE_TIMEOUT_SEC = 7200  # 2 hours max per user pipeline
 
 for uid in user_ids:
-    print(f'Starting pipeline for user {uid}...')
+    print(f'Starting Phase B pipeline for user {uid}...')
     db.table('episodes').upsert({'user_id': uid, 'date': today, 'status': 'generating'}, on_conflict='user_id,date').execute()
     try:
         result = subprocess.run(
@@ -118,8 +206,14 @@ for uid in user_ids:
             cwd=os.environ.get('REPO', '.'),
             timeout=PIPELINE_TIMEOUT_SEC,
         )
-        status = 'ready' if result.returncode == 0 else 'failed'
-        msg = 'Pipeline complete' if result.returncode == 0 else f'Pipeline FAILED (exit {result.returncode})'
+        if result.returncode == 2:
+            # Exit 2 = empty pool for this user (no enabled sources matched the pool)
+            status = 'empty_inbox'
+        elif result.returncode == 0:
+            status = 'ready'
+        else:
+            status = 'failed'
+        msg = f'Pipeline {status}' if status != 'failed' else f'Pipeline FAILED (exit {result.returncode})'
     except subprocess.TimeoutExpired:
         status = 'failed'
         msg = f'Pipeline TIMEOUT after {PIPELINE_TIMEOUT_SEC // 60}min'
@@ -127,4 +221,5 @@ for uid in user_ids:
     print(f'{msg} for user {uid}')
 "
 
+schedule_next_wake
 echo "=== Tick complete $(date '+%Y-%m-%d %H:%M:%S') ==="

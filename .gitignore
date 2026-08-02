@@ -39,3 +39,4 @@ Thumbs.db
 web/node_modules
 web/.next
 
+.vercel

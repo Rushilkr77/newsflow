@@ -3,9 +3,12 @@ import { randomBytes } from 'crypto'
 import { createServiceClient } from '@/lib/supabase'
 import { sendMagicLink, sendAdminAlert } from '@/lib/email'
 
+// Must stay in sync with web/lib/sources.ts ALL_SOURCES ids and config/senders.yaml.
+// All sources here are subscribed in the shared NewsFlow ingestion inbox — no user
+// Gmail access required. Anything not in this set routes to admin for manual catalog review.
 const SUPPORTED_SOURCES = new Set([
-  'tldr_ai', 'tldr_tech', 'tldr_dev',
-  'techcrunch', 'ettech', 'harper_carroll', 'et_ai',
+  'tldr_ai', 'tldr_tech', 'tldr_dev', 'tldr_devops', 'tldr_fintech', 'tldr_crypto',
+  'techcrunch', 'ettech', 'et_ai', 'harper_carroll',
 ])
 
 export async function POST(req: NextRequest) {

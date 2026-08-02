@@ -8,10 +8,8 @@ export async function POST(_req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
 
   const db = createServiceClient()
-  await Promise.all([
-    db.from('gmail_credentials').delete().eq('user_id', userId),
-    db.from('users').update({ active: false }).eq('id', userId),
-  ])
+  // gmail_credentials no longer used — NewsFlow accesses no user inbox.
+  await db.from('users').update({ active: false }).eq('id', userId)
 
   return NextResponse.json({ ok: true })
 }

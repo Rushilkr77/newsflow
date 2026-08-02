@@ -3,14 +3,73 @@ Agent 4b: Script Validator
 Post-script dedup: detects articles covered in multiple deep segments,
 regenerates offending segments with excluded article lists. Max 2 iterations.
 Writes validation_report.json to workspace/{date}/logs/.
+
+Also runs a deterministic speech-marker sanitizer (sanitize_for_speech) on the
+final script before returning — strips literal markdown/punctuation artifacts
+that get read aloud by TTS (**, *, --, —, #, backticks, bullets) while
+preserving real SSML tags (<break>, <emphasis>, <prosody>, <say-as>).
 """
+import re
 import structlog
 
 from agents.script_writer import ScriptWriterAgent, _SEGMENT_ORDER, _CATEGORY_TO_SEGMENT  # noqa: F401
 from models.article import ArticleSummary
-from models.podcast import PodcastScript
+from models.podcast import PodcastScript, Segment
 
 log = structlog.get_logger(__name__)
+
+# ── Deterministic speech-marker sanitizer ─────────────────────────────────────
+
+# Patterns that should NEVER be read aloud. Applied in order.
+# We do NOT touch SSML tags — only literal markdown/punctuation artifacts.
+_SPEECH_MARKER_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Double-star bold: **text** → text (also catches lone **)
+    (re.compile(r'\*\*'), ""),
+    # Single-star italic or stray bullet star: * at word boundary or alone
+    (re.compile(r'(?<!\w)\*(?!\w)'), ""),
+    # Remaining lone asterisks between words (e.g. "foo * bar")
+    (re.compile(r'\s\*\s'), " "),
+    # Double-dash (markdown em-dash substitute): -- → pause via comma+space
+    (re.compile(r'--'), ", "),
+    # Unicode em-dash and en-dash when used as aside markers: — or – surrounded by spaces → comma
+    (re.compile(r' [—–] '), ", "),
+    # Backticks (inline code): `text` → text
+    (re.compile(r'`([^`]*)`'), r'\1'),
+    # Remaining stray backticks
+    (re.compile(r'`'), ""),
+    # Markdown headers: # / ## / ### at line start
+    (re.compile(r'(?m)^#{1,6}\s+'), ""),
+    # Markdown bullets: lines starting with "- " or "* " or numbered "1. "
+    (re.compile(r'(?m)^\s*[-*]\s+'), ""),
+    (re.compile(r'(?m)^\s*\d+\.\s+'), ""),
+    # Collapse multiple spaces left by removals
+    (re.compile(r'  +'), " "),
+]
+
+
+def _sanitize_text(text: str) -> str:
+    """Apply speech-marker cleanup to a single string. Preserves SSML tags."""
+    for pattern, replacement in _SPEECH_MARKER_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text.strip()
+
+
+def sanitize_for_speech(script: PodcastScript) -> PodcastScript:
+    """
+    Return a new PodcastScript with all segment content_ssml and content_plain
+    sanitized to remove literal markdown/punctuation artifacts.
+    SSML tags (e.g. <break time="1s"/>, <emphasis>) are preserved intact.
+    """
+    cleaned_segments: list[Segment] = []
+    for seg in script.segments:
+        cleaned_segments.append(
+            seg.model_copy(update={
+                "content_ssml": _sanitize_text(seg.content_ssml),
+                "content_plain": _sanitize_text(seg.content_plain),
+            })
+        )
+    return script.model_copy(update={"segments": cleaned_segments})
+
 
 # Segments with exclusive deep-dive ownership — articles must not appear in 2+
 _DEEP_SEGMENTS = frozenset({"ai_updates", "funding", "india_tech", "product_strategy"})
@@ -72,6 +131,10 @@ class ScriptValidatorAgent:
             )
         else:
             log.info("validation_converged", total_iterations=iterations_run)
+
+        # Deterministic speech-marker cleanup — always runs on the final script.
+        script = sanitize_for_speech(script)
+        log.info("speech_sanitizer_applied", segment_count=len(script.segments))
 
         return script, report
 

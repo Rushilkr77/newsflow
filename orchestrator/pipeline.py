@@ -10,6 +10,7 @@ Trace files are written to workspace/{date}/logs/ after each stage:
   3_summarization.txt   — content source (trafilatura/snippet) + full summary text
   4_script.txt          — all segment content (full plain text)
 """
+import hashlib
 import json
 import os
 import sys
@@ -38,8 +39,10 @@ from agents.script_validator import ScriptValidatorAgent
 from agents.script_writer import ScriptWriterAgent
 from agents.summarizer import SummarizerAgent
 from models.article import ArticleSummary, CuratedArticle, RawArticle
-from models.enums import Priority
+from models.enums import Priority, Source
 from models.podcast import Episode, PodcastScript
+from orchestrator.pool import is_fresh, load_pool
+from orchestrator.user_sources import filter_pool_for_user, user_source_ids
 
 log = structlog.get_logger(__name__)
 
@@ -411,6 +414,29 @@ def _build_expansion_diff(
     }
 
 
+def _compute_render_key(date: str, source_ids: set[str], bio: str | None) -> str:
+    """
+    Stable hash key for a (date, source_ids, bio) triple.
+    Two users with identical sources and bio share one render per day.
+    Bio is normalised (stripped, lowercased) so whitespace differences don't fragment.
+
+    Requires Supabase migration: ALTER TABLE episodes ADD COLUMN IF NOT EXISTS render_key text;
+    """
+    norm_bio = (bio or "").strip().lower()
+    key_str = f"{date}|{sorted(source_ids)}|{norm_bio}"
+    return hashlib.sha1(key_str.encode()).hexdigest()
+
+
+def _get_db_client():
+    """Return a Supabase service-role client using env vars."""
+    from supabase import create_client
+    url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        raise RuntimeError("Supabase env vars missing (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)")
+    return create_client(url, key)
+
+
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 class NewsFlowPipeline:
@@ -464,17 +490,127 @@ class NewsFlowPipeline:
     def _run(self, date: str, workspace: str, logs_dir: str) -> Episode:
         log.info("pipeline_start", date=date, workspace=workspace, user_id=self._user_id)
 
-        # ── Stage 1: Ingestion ───────────────────────────────────────────────
+        # ── Stage 1: Article pool (shared-enrich) or fallback ingestion ─────
         raw_path = os.path.join(workspace, "raw_articles.json")
-        if Path(raw_path).exists():
-            log.info("checkpoint_found", stage="ingestion")
-            raw_articles = _load_json(raw_path, RawArticle)
+        pool_filtered_path = os.path.join(workspace, "pool_filtered.json")
+
+        if self._user_id and is_fresh(date):
+            # ── Multi-user: load shared pool and filter to this user's sources ──
+            if Path(pool_filtered_path).exists():
+                log.info("checkpoint_found", stage="pool_filter")
+                with open(pool_filtered_path) as _f:
+                    deduped_for_rank: list[dict] = json.load(_f)
+            else:
+                pool = load_pool(date)
+                if pool is None:
+                    raise RuntimeError(
+                        f"Shared pool missing for {date} — Phase A (--phase global) must run first."
+                    )
+                if not pool.get("articles"):
+                    log.warning("pool_empty", date=date, user_id=self._user_id)
+                    # Signal empty_inbox to caller (daily_run.sh checks exit code 2)
+                    sys.exit(2)
+
+                db_client = _get_db_client()
+                allowed = user_source_ids(db_client, self._user_id)
+
+                # Warn about sources the user wants that weren't in today's pool
+                pool_sources = set(pool.get("source_ids_in_union", []))
+                missing = allowed - pool_sources
+                if missing:
+                    log.warning(
+                        "user_sources_not_in_pool",
+                        user_id=self._user_id,
+                        missing=sorted(missing),
+                        hint="Sources added after pool was built; will be included next day.",
+                    )
+
+                if not allowed:
+                    # user_sources is empty — user never configured sources (old onboarding,
+                    # or saved before user_sources was populated). Fall back to full pool
+                    # so existing users always get an episode.
+                    log.warning(
+                        "user_sources_empty_using_full_pool",
+                        user_id=self._user_id,
+                        hint="User has no user_sources rows — serving full pool as fallback.",
+                    )
+                    deduped_for_rank = pool["articles"]
+                else:
+                    deduped_for_rank = filter_pool_for_user(pool["articles"], allowed)
+
+                if not deduped_for_rank:
+                    log.warning("filtered_pool_empty", user_id=self._user_id, allowed=sorted(allowed))
+                    sys.exit(2)  # treated as empty_inbox by daily_run.sh
+
+                with open(pool_filtered_path, "w") as _f:
+                    json.dump(deduped_for_rank, _f, default=str)
+                log.info("pool_filter_complete", filtered_count=len(deduped_for_rank))
+
+            # Reconstruct RawArticle list for trace logging only
+            raw_articles = [RawArticle.model_validate(elem["article"]) for elem in deduped_for_rank]
+
         else:
-            raw_articles = IngestionAgent(user_id=self._user_id).run(date=date)
-            _save_json(raw_articles, raw_path)
-            log.info("ingestion_complete", count=len(raw_articles))
+            # ── Single-tenant / no pool: full ingestion (backward-compat) ───────
+            if Path(raw_path).exists():
+                log.info("checkpoint_found", stage="ingestion")
+                raw_articles = _load_json(raw_path, RawArticle)
+            else:
+                raw_articles = IngestionAgent().run(date=date)
+                _save_json(raw_articles, raw_path)
+                log.info("ingestion_complete", count=len(raw_articles))
+            deduped_for_rank = []  # will fall through to full run() below
 
         _write_ingestion_trace(raw_articles, logs_dir)
+
+        # ── Render memoization check (multi-user + shared pool path only) ────
+        # If another user with the same (source_ids, bio) already rendered today,
+        # reuse their Drive mp3_url — skip curate/summarize/script/TTS.
+        # Cache hit signals via self._cached_drive_url; main() handles delivery.
+        # Requires Supabase migration: ALTER TABLE episodes
+        #   ADD COLUMN IF NOT EXISTS render_key text,
+        #   ADD COLUMN IF NOT EXISTS mp3_url text;
+        self._render_key: str | None = None
+        self._cached_drive_url: str | None = None
+        if self._user_id and deduped_for_rank:
+            try:
+                db_client = _get_db_client()
+                allowed_for_key = user_source_ids(db_client, self._user_id)
+                self._render_key = _compute_render_key(date, allowed_for_key, self._user_bio)
+                # Look for a ready episode with same render_key that already has a Drive URL
+                existing = (
+                    db_client.table("episodes")
+                    .select("mp3_url, script_path")
+                    .eq("date", date)
+                    .eq("render_key", self._render_key)
+                    .eq("status", "ready")
+                    .not_.is_("mp3_url", "null")
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    cached = existing.data[0]
+                    self._cached_drive_url = cached["mp3_url"]
+                    log.info(
+                        "render_cache_hit",
+                        render_key=self._render_key,
+                        mp3_url=self._cached_drive_url,
+                    )
+                    # Point this user's episode row at the shared render
+                    db_client.table("episodes").update({
+                        "mp3_url": self._cached_drive_url,
+                        "script_path": cached.get("script_path"),
+                        "render_key": self._render_key,
+                        "status": "ready",
+                    }).eq("user_id", self._user_id).eq("date", date).execute()
+                    # Return a stub episode — main() detects _cached_drive_url
+                    # and skips Drive upload, using the cached URL for email delivery.
+                    return Episode(
+                        episode_number=0, date=date, duration_sec=0,
+                        file_path="", file_size_bytes=0,
+                        article_count=0, sources_used=[],
+                    )
+            except Exception as exc:
+                log.warning("render_cache_lookup_failed", error=str(exc), render_key=self._render_key)
 
         # ── Stage 2: Curation ────────────────────────────────────────────────
         curated_path = os.path.join(workspace, "curated_articles.json")
@@ -482,7 +618,13 @@ class NewsFlowPipeline:
             log.info("checkpoint_found", stage="curator")
             curated = _load_json(curated_path, CuratedArticle)
         else:
-            curated = CuratorAgent(user_bio=self._user_bio).run(raw_articles)
+            curator = CuratorAgent(user_bio=self._user_bio)
+            if deduped_for_rank:
+                # Shared-enrich path: pool already deduped; run only the per-user rank stage
+                curated = curator.run_rank(deduped_for_rank)
+            else:
+                # Single-tenant / backward-compat: full dedup + rank
+                curated = curator.run(raw_articles)
             _save_json(curated, curated_path)
             log.info("curation_complete", count=len(curated))
 
@@ -649,16 +791,34 @@ def main():
     parser.add_argument("--date", help="Date in YYYY-MM-DD format (default: today)")
     parser.add_argument("--skip-email", action="store_true", help="Skip email delivery step")
     parser.add_argument("--user-id", help="User UUID from DB (multi-user mode)")
+    parser.add_argument(
+        "--phase",
+        choices=["global"],
+        help="Run Phase A (global enrich) only: ingest + dedup + scrape → shared pool.",
+    )
     args = parser.parse_args()
+
+    if args.phase == "global":
+        from orchestrator.global_phase import GlobalEnrichPipeline
+        pool_file = GlobalEnrichPipeline().run(date=args.date)
+        print(f"Pool written to: {pool_file}")
+        return
 
     pipeline = NewsFlowPipeline(user_id=args.user_id)
     episode = pipeline.run(date=args.date)
-    print(f"Episode saved to: {episode.file_path} ({episode.duration_sec // 60} min)")
+    if getattr(pipeline, '_cached_drive_url', None):
+        print(f"Render cache hit — using shared episode: {pipeline._cached_drive_url}")
+    else:
+        print(f"Episode saved to: {episode.file_path} ({episode.duration_sec // 60} min)")
 
     if args.skip_email:
         return
 
-    run_date = Path(episode.file_path).parent.name
+    # For cache-hit episodes, file_path is empty — use args.date or today
+    if episode.file_path:
+        run_date = Path(episode.file_path).parent.name
+    else:
+        run_date = args.date or datetime.now().strftime("%Y-%m-%d")
 
     # Multi-user mode: use email from DB; single-tenant: fall back to preferences.yaml
     recipient = pipeline._user_email
@@ -691,10 +851,29 @@ def main():
 
     from delivery.drive_uploader import upload_episode
     drive_link: str | None = None
-    try:
-        drive_link = upload_episode(Path(episode.file_path), run_date)
-    except Exception as exc:
-        log.warning("drive_upload_failed", error=str(exc))
+
+    # Check if this run used a cached render (render memoization hit)
+    if getattr(pipeline, '_cached_drive_url', None):
+        drive_link = pipeline._cached_drive_url
+        log.info("render_cache_reused", drive_link=drive_link)
+    else:
+        try:
+            drive_link = upload_episode(Path(episode.file_path), run_date)
+        except Exception as exc:
+            log.warning("drive_upload_failed", error=str(exc))
+
+        # Write render_key + mp3_url back to episodes so future same-key users can reuse
+        if args.user_id and drive_link and getattr(pipeline, '_render_key', None):
+            try:
+                _db = _get_db_client()
+                _db.table("episodes").update({
+                    "render_key": pipeline._render_key,
+                    "mp3_url": drive_link,
+                    "script_path": str(workspace / "podcast_script.json"),
+                }).eq("user_id", args.user_id).eq("date", run_date).execute()
+                log.info("render_key_stored", render_key=pipeline._render_key)
+            except Exception as exc:
+                log.warning("render_key_store_failed", error=str(exc))
 
     from delivery.email_sender import send_episode_email
     admin_email = os.environ.get("SMTP_USER", "")

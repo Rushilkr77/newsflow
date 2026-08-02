@@ -22,8 +22,8 @@ export async function POST(req: NextRequest) {
 
   const db = createServiceClient()
 
-  // Upsert user preferences
-  await db.from('users').update({ bio, delivery_local_time: delivery_time, tz }).eq('id', userId)
+  // Upsert user preferences + activate (Gmail connect step removed; sources save = activation)
+  await db.from('users').update({ bio, delivery_local_time: delivery_time, tz, active: true, episode_generation_enabled: true }).eq('id', userId)
 
   // Replace user_sources — delete all then insert enabled ones
   await db.from('user_sources').delete().eq('user_id', userId)

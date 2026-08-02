@@ -52,14 +52,18 @@ _OPENROUTER_CURATOR_MODELS: list[str] = [
 
 # Funding/M&A signal patterns — used for post-classification override
 _FUNDING_SIGNALS = re.compile(
-    r'\$\d+(?:\.\d+)?[MBmb]\b'  # $38M, $1.5B, $100m
-    r'|\bfunding\b'               # funding round
-    r'|\bacquir(?:es?|ed|ing)\b'  # acquires, acquired, acquiring
+    r'\$\d+(?:\.\d+)?[MBmb]\b'                    # $38M, $1.5B, $100m
+    r'|\$\d+(?:\.\d+)?\s*(?:million|billion)\b'   # $33 million, $1.5 billion (spelled out)
+    r'|\bfunding\b'
+    r'|\bracquir(?:es?|ed|ing)\b'
     r'|\bacquisition\b'
     r'|\bmerger\b'
-    r'|\bM&A\b'                   # re.IGNORECASE handles all case variants
+    r'|\bM&A\b'
     r'|\bIPO\b'
-    r'|\bvaluation\b',
+    r'|\bvaluation\b'
+    r'|\binvest(?:ment|s|ed|ing|or)\b'            # investment, investors
+    r'|\bseries [A-F]\b'                           # Series A/B/C/D/E/F
+    r'|\bseed round\b',
     re.IGNORECASE,
 )
 

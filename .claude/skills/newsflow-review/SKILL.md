@@ -13,10 +13,17 @@ Read `agents/script_writer.py` and find `_CHARS_PER_SEC`. Report its value.
 Current expected value: **19** (calibrated for Chatterbox/ElevenLabs, 2026-05-12).
 If the value differs from 19, flag it — duration estimates will be off.
 
-## Step 1 — Identify the date
+## Step 1 — Identify the date and workspace path
 
 Use today's date from `currentDate` in context unless the user specifies otherwise.
-Workspace: `workspace/{date}/`.
+
+**Workspace resolution** (multi-user pipeline stores checkpoints per user):
+1. Check `workspace/{date}/` for `curated_articles.json`. If present → use it.
+2. If not present, run: `ls workspace/` and find UUID-named dirs (format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+3. For each UUID dir, check `workspace/{UUID}/{date}/curated_articles.json` — use the first one that exists.
+4. Report which path was resolved: `workspace/{date}/` or `workspace/{UUID}/{date}/` (and which user UUID).
+
+All subsequent file reads use the resolved workspace path.
 
 ## Step 2 — Article funnel report
 

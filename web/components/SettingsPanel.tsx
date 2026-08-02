@@ -26,7 +26,6 @@ export default function SettingsPanel({ user, sources }: Props) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
-  const [isActive, setIsActive] = useState(user.active)
   const [disconnecting, setDisconnecting] = useState(false)
 
   const save = async () => {
@@ -59,11 +58,10 @@ export default function SettingsPanel({ user, sources }: Props) {
   }
 
   const disconnect = async () => {
-    if (!confirm('Disconnect Gmail? Your episodes will stop until you reconnect.')) return
+    if (!confirm('Disconnect? Your account will be deactivated and episodes will stop.')) return
     setDisconnecting(true)
     await fetch('/api/disconnect', { method: 'POST' })
-    setIsActive(false)
-    setDisconnecting(false)
+    window.location.href = '/'
   }
 
   return (
@@ -128,33 +126,19 @@ export default function SettingsPanel({ user, sources }: Props) {
         </div>
       </div>
 
-      {/* Inbox */}
+      {/* Account */}
       <div className="mt-10">
-        <p className="mono-caps mb-3">Inbox</p>
-        {isActive ? (
-          <p className="font-serif text-sm text-ink-muted">
-            Connected as {user.email}.{' '}
-            <button
-              onClick={disconnect}
-              disabled={disconnecting}
-              className="underline underline-offset-2 hover:no-underline transition-all text-ink"
-            >
-              {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-            </button>
-          </p>
-        ) : (
-          <div>
-            <p className="font-serif text-sm text-ink-muted mb-4">
-              Gmail disconnected. Reconnect to resume episode delivery.
-            </p>
-            <button
-              onClick={() => { window.location.href = `/api/auth/google?hint=${encodeURIComponent(user.email)}` }}
-              className="submit-btn"
-            >
-              Reconnect Gmail
-            </button>
-          </div>
-        )}
+        <p className="mono-caps mb-3">Account</p>
+        <p className="font-serif text-sm text-ink-muted">
+          {user.email}.{' '}
+          <button
+            onClick={disconnect}
+            disabled={disconnecting}
+            className="underline underline-offset-2 hover:no-underline transition-all text-ink"
+          >
+            {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+          </button>
+        </p>
       </div>
 
       {error && <p className="field-error mt-6">{error}</p>}

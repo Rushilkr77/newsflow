@@ -13,11 +13,10 @@ export default function PrivacyPage() {
             <section>
               <h2 className="font-serif text-ink font-medium text-base mb-3">What we read</h2>
               <p>
-                We access your Gmail inbox using Google's read-only OAuth scope
-                (<span className="font-mono text-xs">gmail.readonly</span>). We only search for
-                emails matching the newsletter senders you've configured — specific sender addresses
-                like <span className="font-mono text-xs">dan@tldrnewsletter.com</span>. We never
-                read unrelated messages, attachments, drafts, or sent mail.
+                NewsFlow never accesses your inbox. All newsletters are fetched from a single
+                NewsFlow-owned ingestion account that subscribes to each supported source.
+                Google sign-in shares only your name and email address — no inbox permissions
+                are requested or stored.
               </p>
             </section>
 
@@ -26,17 +25,15 @@ export default function PrivacyPage() {
               <p>
                 We store: your email address, a bio you write yourself, your delivery preferences
                 (time and timezone), the list of newsletters you've enabled, and the generated
-                podcast scripts and MP3 files for each episode. We store a Gmail refresh token
-                (encrypted at rest) so we can fetch your newsletters each morning without
-                requiring you to re-authenticate daily.
+                podcast scripts and MP3 files for each episode. No Gmail credentials or inbox
+                tokens are stored.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-ink font-medium text-base mb-3">What we don't store</h2>
               <p>
-                We don't store the full content of your emails, your inbox metadata, your
-                contacts, or any data from emails outside the configured sender list. We don't
+                We don't access or store any content from your personal email inbox. We don't
                 sell data. There are no third-party analytics or tracking pixels on this site.
               </p>
             </section>
@@ -44,19 +41,20 @@ export default function PrivacyPage() {
             <section>
               <h2 className="font-serif text-ink font-medium text-base mb-3">Who has access</h2>
               <p>
-                Only the NewsFlow service account (running on your host's Mac) can access your
-                Gmail via the stored refresh token. No third party can access it. The encrypted
-                token is stored in a Supabase database with row-level security enabled.
+                Your account data is stored in a Supabase database with row-level security.
+                Only the NewsFlow pipeline running on the host server can read your preferences
+                and delivery settings. No third party has access.
               </p>
             </section>
 
             <section>
               <h2 className="font-serif text-ink font-medium text-base mb-3">How to delete your data</h2>
               <p>
-                Go to Settings → Disconnect to revoke Gmail access and stop episode generation.
-                Your refresh token is deleted immediately. To delete your account and all
+                Go to Settings → Disconnect to stop episode generation and deactivate your account.
+                NewsFlow does not store any Gmail credentials or access your inbox — disconnecting
+                removes your source preferences and delivery schedule. To delete your account and all
                 associated data, reply to any episode email or contact{' '}
-                <span className="font-mono text-xs">rushilmisc77@gmail.com</span>. Full deletion
+                <span className="font-mono text-xs">hello@newsflow.ink</span>. Full deletion
                 takes up to 30 days (MP3s stored on Google Drive are deleted from the shared
                 folder; locally generated script files are purged from the workspace).
               </p>
@@ -66,7 +64,7 @@ export default function PrivacyPage() {
 
           <div className="mt-12 pt-8 border-t border-rule">
             <p className="font-mono text-[0.5rem] text-ink-faint tracking-[0.08em] uppercase">
-              Last updated: June 2026. Questions: rushilmisc77@gmail.com
+              Last updated: June 2026. Questions: hello@newsflow.ink
             </p>
           </div>
         </div>

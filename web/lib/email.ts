@@ -13,8 +13,8 @@ export async function sendMagicLink(to: string, token: string): Promise<void> {
     subject: "You're in — NewsFlow access link",
     html: `
       <p style="font-family:Georgia,serif;font-size:16px;line-height:1.6;color:#1a1a1a;max-width:520px">
-        Your access link is below. It expires in 7 days. Click to connect your Gmail
-        and pick a delivery time.
+        Your access link is below. It expires in 7 days. Click to set up your newsletter
+        sources and delivery time.
       </p>
       <p style="margin:28px 0">
         <a href="${link}" style="font-family:Georgia,serif;font-size:16px;color:#6b1a0f;text-decoration:underline">
@@ -26,6 +26,30 @@ export async function sendMagicLink(to: string, token: string): Promise<void> {
       </p>
     `,
     text: `Your access link:\n\n${link}\n\nExpires in 7 days. If you didn't request this, ignore this email.`,
+  })
+}
+
+export async function sendCatalogRequest(
+  request: { user_email: string; newsletter_name: string; sender_address: string }
+): Promise<void> {
+  const adminEmail = process.env.ADMIN_EMAIL ?? 'rushilmisc77@gmail.com'
+
+  await resend.emails.send({
+    from: FROM,
+    to: adminEmail,
+    subject: `[NewsFlow] Catalog request — ${request.newsletter_name}`,
+    text: [
+      `A logged-in user has requested a new newsletter be added to the catalog.`,
+      ``,
+      `User: ${request.user_email}`,
+      `Newsletter name: ${request.newsletter_name}`,
+      `Sender address: ${request.sender_address}`,
+      ``,
+      `Action required:`,
+      `1. Subscribe the NewsFlow ingestion inbox to this newsletter.`,
+      `2. Add an entry to config/senders.yaml (use parser: generic if no custom parser).`,
+      `3. Add the source id to web/lib/sources.ts ALL_SOURCES and SUPPORTED_SOURCES in api/waitlist/route.ts.`,
+    ].join('\n'),
   })
 }
 

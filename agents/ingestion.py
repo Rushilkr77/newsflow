@@ -137,12 +137,37 @@ def _build_source_routing(senders_config: dict) -> dict:
 
 
 class IngestionAgent:
-    def __init__(self, user_id: str | None = None):
-        self._user_id = user_id
+    def __init__(self, user_id: str | None = None, allowed_source_ids: set[str] | None = None):
+        """
+        user_id: DEPRECATED — all ingestion now uses the shared file-token inbox.
+                 Accepted for backward-compat but ignored; the DB Gmail path is removed.
+        allowed_source_ids: optional set of pipeline Source values (e.g. {'tldr_ai', 'techcrunch'}).
+                 When provided, restricts the Gmail query and routing to only those senders
+                 whose senders.yaml id is in this set. Reduces scope to what active users
+                 actually want. When None, all enabled senders are fetched (single-tenant mode).
+        """
+        if user_id is not None:
+            log.warning(
+                "ingestion_user_id_ignored",
+                reason="Per-user Gmail access removed. All ingestion uses the shared file-token inbox.",
+                user_id=user_id,
+            )
         self._service = None
         self._senders_config = _load_senders_config()
-        self._gmail_query = _build_gmail_query(self._senders_config)
-        self._source_routing = _build_source_routing(self._senders_config)
+
+        # Filter senders.yaml to allowed_source_ids if provided
+        if allowed_source_ids:
+            filtered_senders = [
+                s for s in self._senders_config.get("senders", [])
+                if s.get("id") in allowed_source_ids and s.get("enabled", False)
+            ]
+            effective_config = dict(self._senders_config)
+            effective_config["senders"] = filtered_senders
+        else:
+            effective_config = self._senders_config
+
+        self._gmail_query = _build_gmail_query(effective_config)
+        self._source_routing = _build_source_routing(effective_config)
         self._excluded_variants = self._senders_config.get("excluded_variants", [])
         self._sender_lookback = _build_sender_lookback_map(self._senders_config)
 
@@ -325,36 +350,7 @@ class IngestionAgent:
         return filtered
 
     def _get_gmail_service(self):
-        if self._user_id:
-            return self._get_gmail_service_from_db(self._user_id)
         return self._get_gmail_service_from_file()
-
-    def _get_gmail_service_from_db(self, user_id: str):
-        from supabase import create_client
-        url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-        db = create_client(url, key)
-        result = db.table("gmail_credentials").select("refresh_token_encrypted").eq("user_id", user_id).maybe_single().execute()
-        if not result.data:
-            raise RuntimeError(f"No Gmail credentials found for user {user_id}")
-        refresh_token = result.data["refresh_token_encrypted"]
-
-        client_id = os.environ.get("WEB_GOOGLE_CLIENT_ID")
-        client_secret = os.environ.get("WEB_GOOGLE_CLIENT_SECRET")
-        if not client_id or not client_secret:
-            raise RuntimeError("WEB_GOOGLE_CLIENT_ID / WEB_GOOGLE_CLIENT_SECRET not set in .env")
-        # Don't pass scopes= on refresh — passing scopes causes Google to reject the
-        # refresh if the stored token was granted for fewer scopes (invalid_scope/unauthorized_client).
-        # The token refreshes using whatever scopes were originally granted during OAuth.
-        creds = Credentials(
-            token=None,
-            refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-        creds.refresh(Request())
-        return build("gmail", "v1", credentials=creds)
 
     def _get_gmail_service_from_file(self):
         creds_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "credentials.json")

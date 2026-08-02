@@ -88,6 +88,25 @@ _SEGMENT_ORDER = [
     ("closing", "Closing"),
 ]
 
+# Keyword signals for spillover routing — used only when classifier leaves a segment empty.
+# Intentionally conservative: false-positive spillover is worse than a missing segment.
+_SPILLOVER_FUNDING = re.compile(
+    r'\b(?:raises?|raised|funding|series [A-F]|seed round|acqui(?:res?|red|sition)|M&A|IPO|valuat)\b'
+    r'|\$\d+(?:\.\d+)?\s*[MBmb]\b',
+    re.IGNORECASE,
+)
+_SPILLOVER_STRATEGY = re.compile(
+    r'\b(?:strateg|launch(?:es|ed)?|partner(?:ship)?|expand(?:s|ed|ing)?|pivot|restructur|'
+    r'platform|ecosystem|go-to-market|GTM|enterprise|SaaS|B2B)\b',
+    re.IGNORECASE,
+)
+
+# If segment X is empty, search these donor segments (in order) for spillover candidates.
+_SPILLOVER_DONORS: dict[str, list[str]] = {
+    "funding":          ["india_tech", "quick_hits"],
+    "product_strategy": ["india_tech", "ai_updates", "quick_hits"],
+}
+
 # Updated category → segment mapping for new Category enum
 _CATEGORY_TO_SEGMENT = {
     Category.BIG_TECH_LAUNCHES:   "ai_updates",
@@ -861,7 +880,47 @@ Return ONLY this JSON object. Fill in every field with real content — do not r
         for s in summaries:
             seg_id = _CATEGORY_TO_SEGMENT.get(s.category, "quick_hits")
             groups[seg_id].append(s)
+        self._fill_empty_segments(groups)
         return groups
+
+    def _fill_empty_segments(self, groups: dict[str, list[ArticleSummary]]) -> None:
+        """Spillover: move articles from donor segments to fill expected-but-empty segments.
+
+        Only triggers when the curator left a segment empty — classifier fix in curator.py
+        is the primary defence; this is a safety net for residual mis-routing.
+        Moves at most 2 articles per empty segment. Prefers higher-priority articles.
+        """
+        _signal_map = {
+            "funding":          _SPILLOVER_FUNDING,
+            "product_strategy": _SPILLOVER_STRATEGY,
+        }
+        for target_seg, donors in _SPILLOVER_DONORS.items():
+            if groups[target_seg]:
+                continue  # already has articles — no spillover needed
+            signal = _signal_map[target_seg]
+            moved = 0
+            for donor in donors:
+                if moved >= 2:
+                    break
+                # Sort donor articles by priority (P0 first) so we promote best articles
+                candidates = sorted(
+                    [s for s in groups[donor] if signal.search(s.title or "")],
+                    key=lambda s: {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(
+                        s.priority.value if hasattr(s.priority, "value") else str(s.priority), 3
+                    ),
+                )
+                for art in candidates:
+                    if moved >= 2:
+                        break
+                    groups[donor].remove(art)
+                    groups[target_seg].append(art)
+                    log.info(
+                        "segment_spillover",
+                        from_seg=donor,
+                        to_seg=target_seg,
+                        title=(art.title or "")[:60],
+                    )
+                    moved += 1
 
     def _format_date(self, date: str) -> str:
         dt = datetime.strptime(date, "%Y-%m-%d")
