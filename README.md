@@ -16,7 +16,7 @@ Gmail (newsletters) → Parse → Scrape → Deduplicate → Classify & Rank
                               Google Drive + Email delivery
 ```
 
-**End-to-end, fully automated. Zero manual steps after setup.**
+**End-to-end, fully automated — zero manual steps after setup.**
 
 ---
 
@@ -36,17 +36,17 @@ Gmail (newsletters) → Parse → Scrape → Deduplicate → Classify & Rank
 
 ## Technical Highlights
 
-**Multi-agent architecture** — each stage is an isolated agent with a typed Pydantic contract, checkpoint file, and structured logs. A failed stage can be re-run without reprocessing earlier stages.
+**Multi-agent architecture.** Each stage runs as an isolated agent with a typed Pydantic contract, a checkpoint file, and structured logs, so a failed stage reruns without reprocessing everything before it.
 
-**Resilient LLM fallback chain** — calls route through OpenRouter free-tier models in sequence (gpt-oss-120b → hermes-405b → llama-70b → gemma-31b). Models that return 404 or hit daily limits are session-blacklisted after first failure, eliminating redundant retries.
+**LLM fallback chain.** Calls route through OpenRouter's free-tier models in sequence — gpt-oss-120b, hermes-405b, llama-70b, gemma-31b. A model that 404s or hits its daily limit gets blacklisted for the session after one failure, so retries stop hitting a dead model.
 
-**Smart deduplication** — URL-level dedup first, then semantic similarity via `all-MiniLM-L6-v2` embeddings. Handles 30–40% article overlap across sources without dropping unique coverage.
+**Deduplication.** URL matching catches exact repeats first; semantic similarity via `all-MiniLM-L6-v2` embeddings catches the rest. Sources overlap 30–40% day to day, and this keeps unique coverage intact.
 
-**Source-aware parsing** — each newsletter has a dedicated parser (TLDR, TechCrunch, ETtech, ET AI, Harper's Carroll) tuned to its HTML structure and variant detection for A/B subject lines.
+**Per-source parsers.** TLDR, TechCrunch, ETtech, ET AI, and Harper's Carroll each get a dedicated parser tuned to their HTML structure, plus variant detection for A/B subject lines.
 
-**Grounding check** — script writer validates numeric claims (dollar amounts, percentages) against source summaries. Regenerates the segment if ≥3 unmatched facts detected.
+**Grounding check.** The script writer checks every numeric claim — dollar amounts, percentages — against the source summaries, and regenerates a segment if it finds 3 or more unmatched facts.
 
-**SSML audio quality** — script uses `<prosody>`, `<emphasis>`, `<break>`, and `<say-as>` tags. Markdown artifacts from LLM output are stripped before TTS synthesis.
+**SSML prosody.** Scripts use `<prosody>`, `<emphasis>`, `<break>`, and `<say-as>` tags instead of flat text, and markdown artifacts from the LLM get stripped before synthesis.
 
 ---
 
@@ -100,4 +100,4 @@ Requires: `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, Google Cloud service accoun
 
 ## Why I Built This
 
-I'm transitioning from SDE to AI PM. Keeping up with the pace of AI news across multiple sources was taking 1–2 hours daily. This project let me apply engineering skills toward a real personal workflow problem — and gave me hands-on experience with LLM orchestration, prompt engineering, and agentic pipelines in a production-like setting.
+I'm transitioning from SDE to AI PM, and keeping up with AI news across multiple newsletters was eating 1–2 hours a day. Building this instead gave me a real problem to apply engineering skills to: orchestrating LLM calls, writing prompts that hold up against newsletter noise, and getting an agent pipeline to run unattended every morning.
