@@ -796,7 +796,19 @@ def main():
         choices=["global"],
         help="Run Phase A (global enrich) only: ingest + dedup + scrape → shared pool.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["podcast", "post"],
+        default="podcast",
+        help="post: stop after dedup+scrape and write the LinkedIn brief (no episode).",
+    )
     args = parser.parse_args()
+
+    if args.mode == "post":
+        from orchestrator.post_phase import run_post
+        brief = run_post(date=args.date)
+        print(f"Brief written to: {brief}" if brief else "Pool empty — no brief written.")
+        return
 
     if args.phase == "global":
         from orchestrator.global_phase import GlobalEnrichPipeline

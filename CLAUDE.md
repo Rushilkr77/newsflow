@@ -20,6 +20,10 @@ Multi-agent pipeline that transforms daily email newsletters into a single-host 
 - **Location**: India (IST timezone)
 - **Schedule**: Pipeline runs at 10:00 AM IST daily (launchd, macOS)
 
+## LinkedIn Post Mode
+
+`python -m orchestrator.pipeline --mode post` reuses Phase A (ingest + dedup + scrape) and writes `workspace/post/{date}/brief.md` + `articles/{id}.txt` (every story, nothing filtered; duplicates folded as one-line variants; classifier output is tags only). No summarize/script/audio. `scripts/post_run.sh` + `scripts/com.newsflow.post.plist` run it daily. The `/newsflow-post` skill (`.claude/skills/newsflow-post/`, voice in `config/linkedin_voice.md`) judges stories, interviews Rushil, and drafts only if his insight clears the bar. Code: `orchestrator/post_phase.py`; tests: `tests/test_post_phase.py`.
+
 ## Tech Stack
 
 | Layer | Technology |

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.newsflow.post</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/rushilkr/Projects/newsflow/scripts/post_run.sh</string>
+    </array>
+
+    <!-- Daily 07:15 local (IST) — after the overnight US newsletters have landed and
+         after daily_run.sh's usual Phase A window (06:30). Edit Hour/Minute to taste. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>7</integer>
+        <key>Minute</key><integer>15</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/rushilkr/Projects/newsflow/workspace/launchd_post_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/rushilkr/Projects/newsflow/workspace/launchd_post_stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/rushilkr</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

@@ -111,6 +111,7 @@ class GlobalEnrichPipeline:
                     "all_sources": [s.value if hasattr(s, "value") else s for s in elem["all_sources"]],
                     "dedup_group_id": elem.get("dedup_group_id"),
                     "context_only": elem.get("context_only", False),
+                    "variants": elem.get("variants", []),
                 }
                 for elem in deduped
             ]
@@ -142,6 +143,7 @@ class GlobalEnrichPipeline:
                     else [s.value for s in deduped[i]["all_sources"]],
                 "dedup_group_id": deduped[i].get("dedup_group_id"),
                 "context_only": deduped[i].get("context_only", False),
+                "variants": deduped[i].get("variants", []),
             }
             for i in range(len(deduped))
         ]

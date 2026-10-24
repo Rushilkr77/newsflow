@@ -72,6 +72,7 @@ class CuratorAgent:
     def __init__(self, user_bio: str | None = None):
         self._prefs = self._load_prefs()
         self._embed_model = None  # lazy-loaded on first semantic dedup call
+        self._semantic_merges: dict[str, str] = {}
         if user_bio:
             self._prefs.setdefault("user_profile", {})["role"] = user_bio
 
@@ -88,6 +89,7 @@ class CuratorAgent:
             "all_sources": list[Source],
             "dedup_group_id": str | None,
             "context_only": bool,
+            "variants": list[{"source", "title", "url"}],  # duplicates folded into this story
           }
         No LLM calls — only local sentence-transformer embeddings.
         """
@@ -98,6 +100,11 @@ class CuratorAgent:
 
         # Semantic dedup: merge stories that are the same topic but have different URLs
         sem_deduped_articles = self._semantic_dedup([item["article"] for item in deduped])
+        # Fold semantically-dropped stories into the kept one as one-line variants
+        by_id = {item["article"].id: item for item in deduped}
+        for dropped_id, kept_id in self._semantic_merges.items():
+            dropped, kept = by_id[dropped_id], by_id[kept_id]
+            kept["variants"] += [self._variant(dropped["article"]), *dropped["variants"]]
         # Rebuild the deduped list, preserving all_sources/dedup_group_id for kept articles
         kept_ids = {a.id for a in sem_deduped_articles}
         deduped = [item for item in deduped if item["article"].id in kept_ids]
@@ -107,12 +114,13 @@ class CuratorAgent:
 
         return deduped
 
-    def run_rank(self, deduped: list[dict]) -> list[CuratedArticle]:
+    def run_rank(self, deduped: list[dict], apply_budget: bool = True) -> list[CuratedArticle]:
         """
         Phase B (per-user): LLM classify → time budget.
         Consumes the output of run_dedup() (pool element dicts).
         full_text is copied from the pool article into the CuratedArticle so the
         summarizer's _fetch_full_text skips already-scraped articles.
+        apply_budget=False returns every classified article (tags only, nothing cut).
         """
         log.info("curator_rank_start", input_count=len(deduped))
         # Pool stores articles as plain dicts (model_dump); normalize to Pydantic models
@@ -125,8 +133,8 @@ class CuratorAgent:
         curated = self._classify(deduped)
         log.info("classification_complete", count=len(curated))
 
-        final = self._apply_time_budget(curated)
-        log.info("time_budget_applied", final_count=len(final))
+        final = self._apply_time_budget(curated) if apply_budget else curated
+        log.info("time_budget_applied", final_count=len(final), skipped=not apply_budget)
 
         return final
 
@@ -215,10 +223,16 @@ class CuratorAgent:
                     "article": best,
                     "all_sources": all_sources,
                     "dedup_group_id": str(uuid.uuid4()) if len(group) > 1 else None,
+                    "variants": [self._variant(a) for a in group if a is not best],
                 }
             )
 
         return deduped
+
+    @staticmethod
+    def _variant(a: RawArticle) -> dict:
+        """One-line record of a duplicate folded into a kept story."""
+        return {"id": a.id, "source": a.source.value, "title": a.title, "url": str(a.url)}
 
     def _normalize_url(self, url: str) -> str:
         """Strip utm params, trailing slash, www prefix for comparison."""
@@ -245,6 +259,7 @@ class CuratorAgent:
         Groups with similarity >= semantic_dedup_threshold are merged: the article from
         the highest-priority source is kept; ties broken by longer snippet.
         """
+        self._semantic_merges = {}  # dropped article id -> kept article id
         if len(articles) <= 1:
             return articles
 
@@ -304,6 +319,13 @@ class CuratorAgent:
         # Build set of representative indices (those NOT dropped)
         dropped = set(merged_into.keys())
         representatives = [i for i in range(n) if i not in dropped]
+
+        def _root(k: int) -> int:
+            while k in merged_into:
+                k = merged_into[k]
+            return k
+
+        self._semantic_merges = {articles[k].id: articles[_root(k)].id for k in dropped}
 
         result = [articles[i] for i in representatives]
 

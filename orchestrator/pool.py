@@ -10,6 +10,7 @@ Pool element format (pre-classification — no per-user fields):
     "all_sources":    list[str],   # Source enum values (all sources that covered this story)
     "dedup_group_id": str | None,
     "context_only":   bool,
+    "variants":       list[dict],  # [{source, title, url}] duplicates folded into this story (may be absent in old pools)
   }
 
 Pool envelope:
